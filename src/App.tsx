@@ -1,4 +1,6 @@
 import React, { useState, useEffect, useRef } from "react";
+import { db } from "./firebase";
+import { collection, doc, setDoc, deleteDoc, onSnapshot } from "firebase/firestore";
 import * as ExcelJS from "exceljs";
 import { saveAs } from "file-saver";
 import { motion, AnimatePresence } from "motion/react";
@@ -90,31 +92,7 @@ const formatCurrency = (value: number) => {
   }).format(value);
 };
 
-function useLocalStorage<T>(key: string, initialValue: T) {
-  const [storedValue, setStoredValue] = useState<T>(() => {
-    try {
-      const item = window.localStorage.getItem(key);
-      return item ? JSON.parse(item) : initialValue;
-    } catch (error) {
-      console.warn(error);
-      return initialValue;
-    }
-  });
 
-  const setValue = (value: T | ((val: T) => T)) => {
-    try {
-      setStoredValue((prev) => {
-        const valueToStore = value instanceof Function ? value(prev) : value;
-        window.localStorage.setItem(key, JSON.stringify(valueToStore));
-        return valueToStore;
-      });
-    } catch (error) {
-      console.warn(error);
-    }
-  };
-
-  return [storedValue, setValue] as const;
-}
 
 export default function App() {
   const [isLoading, setIsLoading] = useState(true);
@@ -124,10 +102,7 @@ export default function App() {
   const [reportEndDate, setReportEndDate] = useState<string>("");
   const [activeCategory, setActiveCategory] = useState<string>("Todos");
   const [searchQuery, setSearchQuery] = useState("");
-  const [cartItems, setCartItems] = useLocalStorage<OrderItem[]>(
-    "pos-cart",
-    [],
-  );
+  const [cartItems, setCartItems] = useState<OrderItem[]>([]);
   const [tableNumber, setTableNumber] = useState("");
   const [orderType, setOrderType] = useState<OrderType>("mesa");
   const [editingOrderId, setEditingOrderId] = useState<string | null>(null);
@@ -149,20 +124,11 @@ export default function App() {
 
   const [validationError, setValidationError] = useState<string | null>(null);
 
-  const checkoutValidation = validarDocumento(checkoutForm.documentId === "9999999999999" ? "CONSUMIDOR_FINAL" : (checkoutForm.documentId.length === 10 ? "CEDULA" : (checkoutForm.documentId.length === 13 ? "RUC" : "PASAPORTE")), checkoutForm.documentId);
+  const [categoriesSeeded, setCategoriesSeeded] = useState(false);
+  const [customerSeeded, setCustomerSeeded] = useState(false);
 
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      setIsLoading(false);
-    }, 2000);
-    return () => clearTimeout(timer);
-  }, []);
-
-  // Inventory State
-  const [providers, setProviders] = useLocalStorage<Provider[]>(
-    "pos-providers",
-    PROVIDERS,
-  );
+  // Inventory and Other States
+  const [providers, setProvidersState] = useState<Provider[]>([]);
   const [isProviderModalOpen, setIsProviderModalOpen] = useState(false);
   const [newProviderForm, setNewProviderForm] = useState({
     id: "",
@@ -175,10 +141,7 @@ export default function App() {
   const [providerToDelete, setProviderToDelete] = useState<string | null>(null);
 
   // Expense State
-  const [expenses, setExpenses] = useLocalStorage<Expense[]>(
-    "pos-expenses",
-    [],
-  );
+  const [expenses, setExpensesState] = useState<Expense[]>([]);
   const [isExpenseModalOpen, setIsExpenseModalOpen] = useState(false);
   const [newExpenseForm, setNewExpenseForm] = useState({
     description: "",
@@ -189,25 +152,16 @@ export default function App() {
   const [inventoryTab, setInventoryTab] = useState<
     "Materia Prima" | "Comidas" | "Bebidas" | "Combos"
   >("Materia Prima");
-  const [inventoryItems, setInventoryItems] = useLocalStorage<InventoryItem[]>(
-    "pos-inventory-items",
-    INVENTORY_ITEMS,
-  );
-  const [inventoryComidas, setInventoryComidas] = useLocalStorage<ComidaItem[]>(
-    "pos-inventory-comidas",
-    INVENTORY_COMIDAS,
-  );
-  const [inventoryBebidas, setInventoryBebidas] = useLocalStorage<
-    InventoryItem[]
-  >("pos-inventory-bebidas", INVENTORY_BEBIDAS);
+  const [inventoryItems, setInventoryItemsState] = useState<InventoryItem[]>([]);
+  const [inventoryComidas, setInventoryComidasState] = useState<ComidaItem[]>([]);
+  const [inventoryBebidas, setInventoryBebidasState] = useState<InventoryItem[]>([]);
 
-  const [menuCategories, setMenuCategories] = useLocalStorage<Category[]>("pos-menu-categories", []);
-  const [menuProducts, setMenuProducts] = useLocalStorage<MenuItem[]>("pos-menu-products", []);
+  const [menuCategories, setMenuCategoriesState] = useState<Category[]>([]);
+  const [menuProducts, setMenuProductsState] = useState<MenuItem[]>([]);
+  const [inventoryCombos, setInventoryCombosState] = useState<ComboItem[]>([]);
+  const [salesNotes, setSalesNotesState] = useState<Order[]>([]);
+  const [customers, setCustomersState] = useState<Customer[]>([]);
 
-  const [inventoryCombos, setInventoryCombos] = useLocalStorage<ComboItem[]>(
-    "pos-inventory-combos",
-    INVENTORY_COMBOS,
-  );
   const [isInventoryModalOpen, setIsInventoryModalOpen] = useState(false);
   const [newItemForm, setNewItemForm] = useState({
     id: "",
@@ -226,6 +180,185 @@ export default function App() {
     itemId: "",
     quantity: "",
   });
+
+  const checkoutValidation = validarDocumento(checkoutForm.documentId === "9999999999999" ? "CONSUMIDOR_FINAL" : (checkoutForm.documentId.length === 10 ? "CEDULA" : (checkoutForm.documentId.length === 13 ? "RUC" : "PASAPORTE")), checkoutForm.documentId);
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setIsLoading(false);
+    }, 2000);
+    return () => clearTimeout(timer);
+  }, []);
+
+  // Sincronización en tiempo real con Firestore
+  useEffect(() => {
+    const unsubProviders = onSnapshot(collection(db, "providers"), (snapshot) => {
+      setProvidersState(snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as Provider)));
+    });
+    const unsubExpenses = onSnapshot(collection(db, "expenses"), (snapshot) => {
+      setExpensesState(snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as Expense)));
+    });
+    const unsubInvItems = onSnapshot(collection(db, "inventoryItems"), (snapshot) => {
+      setInventoryItemsState(snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as InventoryItem)));
+    });
+    const unsubInvComidas = onSnapshot(collection(db, "inventoryComidas"), (snapshot) => {
+      setInventoryComidasState(snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as ComidaItem)));
+    });
+    const unsubInvBebidas = onSnapshot(collection(db, "inventoryBebidas"), (snapshot) => {
+      setInventoryBebidasState(snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as InventoryItem)));
+    });
+    const unsubInvCombos = onSnapshot(collection(db, "inventoryCombos"), (snapshot) => {
+      setInventoryCombosState(snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as ComboItem)));
+    });
+    const unsubCategories = onSnapshot(collection(db, "menuCategories"), (snapshot) => {
+      setMenuCategoriesState(snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as Category)));
+    });
+    const unsubProducts = onSnapshot(collection(db, "menuProducts"), (snapshot) => {
+      setMenuProductsState(snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as MenuItem)));
+    });
+    const unsubSalesNotes = onSnapshot(collection(db, "salesNotes"), (snapshot) => {
+      setSalesNotesState(snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as Order)));
+    });
+    const unsubCustomers = onSnapshot(collection(db, "customers"), (snapshot) => {
+      setCustomersState(snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as Customer)));
+    });
+
+    return () => {
+      unsubProviders();
+      unsubExpenses();
+      unsubInvItems();
+      unsubInvComidas();
+      unsubInvBebidas();
+      unsubInvCombos();
+      unsubCategories();
+      unsubProducts();
+      unsubSalesNotes();
+      unsubCustomers();
+    };
+  }, []);
+
+  // Inicializar datos base en Firestore si están vacíos
+  useEffect(() => {
+    if (menuCategories.length === 0 && !isLoading && !categoriesSeeded) {
+      setCategoriesSeeded(true);
+      const defaultCategories = [
+        { id: "CAT-1", name: "Ceviches", status: "activo" },
+        { id: "CAT-2", name: "Chicharrones y Jaleas", status: "activo" },
+        { id: "CAT-3", name: "Chaulafan y Arroz", status: "activo" },
+        { id: "CAT-4", name: "Sopas y Sudados", status: "activo" },
+        { id: "CAT-5", name: "Bebidas", status: "activo" },
+        { id: "CAT-6", name: "Cervezas", status: "activo" },
+        { id: "CAT-7", name: "Guarniciones / Extras", status: "activo" },
+        { id: "CAT-8", name: "Combos", status: "activo" },
+      ];
+      defaultCategories.forEach(async (cat) => {
+        await setDoc(doc(db, "menuCategories", cat.id), cat);
+      });
+    }
+  }, [menuCategories, isLoading, categoriesSeeded]);
+
+  useEffect(() => {
+    if (customers.length === 0 && !isLoading && !customerSeeded) {
+      setCustomerSeeded(true);
+      const defaultCustomer = {
+        id: "CUST-DEFAULT",
+        name: "Consumidor Final",
+        documentType: "Consumidor Final",
+        documentNumber: "9999999999999",
+        address: "Sin dirección",
+        status: "activo",
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        totalPurchases: 0,
+        numberOfPurchases: 0
+      };
+      setDoc(doc(db, "customers", defaultCustomer.id), defaultCustomer);
+    }
+  }, [customers, isLoading, customerSeeded]);
+
+
+  const syncDiff = async <Item extends { id: string }>(
+    collectionName: string,
+    current: Item[],
+    next: Item[]
+  ) => {
+    const nextMap = new Map(next.map(item => [item.id, item]));
+    const currentMap = new Map(current.map(item => [item.id, item]));
+
+    for (const item of next) {
+      const curItem = currentMap.get(item.id);
+      if (!curItem || JSON.stringify(curItem) !== JSON.stringify(item)) {
+        await setDoc(doc(db, collectionName, item.id), item);
+      }
+    }
+
+    for (const item of current) {
+      if (!nextMap.has(item.id)) {
+        await deleteDoc(doc(db, collectionName, item.id));
+      }
+    }
+  };
+
+  const setProviders = (value: React.SetStateAction<Provider[]>) => {
+    const next = typeof value === "function" ? (value as Function)(providers) : value;
+    setProvidersState(next);
+    syncDiff("providers", providers, next);
+  };
+
+  const setExpenses = (value: React.SetStateAction<Expense[]>) => {
+    const next = typeof value === "function" ? (value as Function)(expenses) : value;
+    setExpensesState(next);
+    syncDiff("expenses", expenses, next);
+  };
+
+  const setInventoryItems = (value: React.SetStateAction<InventoryItem[]>) => {
+    const next = typeof value === "function" ? (value as Function)(inventoryItems) : value;
+    setInventoryItemsState(next);
+    syncDiff("inventoryItems", inventoryItems, next);
+  };
+
+  const setInventoryComidas = (value: React.SetStateAction<ComidaItem[]>) => {
+    const next = typeof value === "function" ? (value as Function)(inventoryComidas) : value;
+    setInventoryComidasState(next);
+    syncDiff("inventoryComidas", inventoryComidas, next);
+  };
+
+  const setInventoryBebidas = (value: React.SetStateAction<InventoryItem[]>) => {
+    const next = typeof value === "function" ? (value as Function)(inventoryBebidas) : value;
+    setInventoryBebidasState(next);
+    syncDiff("inventoryBebidas", inventoryBebidas, next);
+  };
+
+  const setMenuCategories = (value: React.SetStateAction<Category[]>) => {
+    const next = typeof value === "function" ? (value as Function)(menuCategories) : value;
+    setMenuCategoriesState(next);
+    syncDiff("menuCategories", menuCategories, next);
+  };
+
+  const setMenuProducts = (value: React.SetStateAction<MenuItem[]>) => {
+    const next = typeof value === "function" ? (value as Function)(menuProducts) : value;
+    setMenuProductsState(next);
+    syncDiff("menuProducts", menuProducts, next);
+  };
+
+  const setInventoryCombos = (value: React.SetStateAction<ComboItem[]>) => {
+    const next = typeof value === "function" ? (value as Function)(inventoryCombos) : value;
+    setInventoryCombosState(next);
+    syncDiff("inventoryCombos", inventoryCombos, next);
+  };
+
+  const setSalesNotes = (value: React.SetStateAction<Order[]>) => {
+    const next = typeof value === "function" ? (value as Function)(salesNotes) : value;
+    setSalesNotesState(next);
+    syncDiff("salesNotes", salesNotes, next);
+  };
+
+  const setCustomers = (value: React.SetStateAction<Customer[]>) => {
+    const next = typeof value === "function" ? (value as Function)(customers) : value;
+    setCustomersState(next);
+    syncDiff("customers", customers, next);
+  };
+
 
   const handleOpenModal = () => {
     let defaultCategory = "Pescados y Mariscos";
@@ -489,27 +622,7 @@ export default function App() {
     });
   };
 
-  const [salesNotes, setSalesNotes] = useLocalStorage<Order[]>(
-    "pos-sales-notes",
-    [],
-  );
-  const [customers, setCustomers] = useLocalStorage<Customer[]>(
-    "pos-customers",
-    [
-      {
-        id: "CUST-DEFAULT",
-        name: "Consumidor Final",
-        documentType: "Consumidor Final",
-        documentNumber: "9999999999999",
-        address: "Sin dirección",
-        status: "activo",
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-        totalPurchases: 0,
-        numberOfPurchases: 0
-      }
-    ]
-  );
+
   const [documentType, setDocumentType] = useState<"nota" | "factura">("nota");
 
   const updateInventory = (
