@@ -1,0 +1,6 @@
+{
+  "name": "Facturación SalyMar",
+  "description": "Sistema de punto de venta y facturación para Cevicheria SalyMar.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
