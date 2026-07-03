@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useEffect } from "react";
 import { MenuItem, Category, InventoryItem, RecipeIngredient } from "../types";
-import { Search, Plus, Edit2, Trash2, CheckCircle, XCircle, Package, Tag, Archive, Image as ImageIcon, Check, X } from "lucide-react";
+import { Search, Plus, Edit2, Trash2, CheckCircle, XCircle, Package, Tag, Archive, Image as ImageIcon, Check, X, AlertCircle } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import Pagination from "./Pagination";
 
@@ -19,6 +19,45 @@ export default function ProductsDashboard({
   setCategories,
   inventoryItems,
 }: ProductsDashboardProps) {
+  const [alertModal, setAlertModal] = useState<{
+    isOpen: boolean;
+    title: string;
+    message: string;
+    type: "info" | "success" | "error" | "warning";
+  }>({
+    isOpen: false,
+    title: "",
+    message: "",
+    type: "info"
+  });
+
+  const showAlert = (message: string, title = "Notificación", type: "info" | "success" | "error" | "warning" = "info") => {
+    setAlertModal({
+      isOpen: true,
+      title,
+      message,
+      type
+    });
+  };
+  const getProductStock = (product: MenuItem) => {
+    if (!product.recipe || product.recipe.length === 0) {
+      return product.stock || 0;
+    }
+    if (!inventoryItems || inventoryItems.length === 0) {
+      return 0;
+    }
+    let maxPortions = Infinity;
+    for (const ing of product.recipe) {
+      const raw = inventoryItems.find((item) => item.id === ing.itemId);
+      if (!raw) return 0;
+      const portions = Math.floor(raw.quantity / ing.quantity);
+      if (portions < maxPortions) {
+        maxPortions = portions;
+      }
+    }
+    return maxPortions === Infinity ? 0 : maxPortions;
+  };
+
   const [view, setView] = useState<"list" | "grid" | "form">("list");
   const [searchQuery, setSearchQuery] = useState("");
   const [filterCategory, setFilterCategory] = useState<string>("Todos");
@@ -143,12 +182,12 @@ export default function ProductsDashboard({
     const finalCost = isCostAuto ? computedCost.toFixed(2) : form.cost;
 
     if (!form.name || !form.price || !form.category || !finalCost) {
-      alert("Por favor, complete todos los campos obligatorios, incluyendo el costo.");
+      showAlert("Por favor, complete todos los campos obligatorios, incluyendo el costo.", "Campos Requeridos", "warning");
       return;
     }
 
     if (form.recipe.length === 0) {
-      alert("La receta es obligatoria. Debe agregar al menos un ingrediente de la bodega.");
+      showAlert("La receta es obligatoria. Debe agregar al menos un ingrediente de la bodega.", "Receta Requerida", "warning");
       return;
     }
 
@@ -177,7 +216,7 @@ export default function ProductsDashboard({
     } else {
       // Check for duplicates
       if (products.some((p) => p.name.toLowerCase() === newProduct.name.toLowerCase() && p.category === newProduct.category)) {
-        alert("Ya existe un producto con el mismo nombre y categoría.");
+        showAlert("Ya existe un producto con el mismo nombre y categoría.", "Producto Duplicado", "error");
         return;
       }
       setProducts((prev) => [newProduct, ...prev]);
@@ -350,13 +389,14 @@ export default function ProductsDashboard({
                         <td className="p-4 font-bold text-indigo-600">{formatCurrency(p.price)}</td>
                         <td className="p-4 text-slate-600">{p.aplicaIva ? "Sí (15%)" : "No"}</td>
                         <td className="p-4">
-                          {p.stock !== undefined ? (
-                            <span className={`font-bold ${p.stock <= (p.stockMinimo || 0) ? "text-red-500" : "text-slate-600"}`}>
-                              {p.stock}
-                            </span>
-                          ) : (
-                            <span className="text-slate-400">-</span>
-                          )}
+                          {(() => {
+                            const currentStock = getProductStock(p);
+                            return (
+                              <span className={`font-bold ${currentStock <= (p.stockMinimo || 0) ? "text-red-500" : "text-slate-600"}`}>
+                                {currentStock}
+                              </span>
+                            );
+                          })()}
                         </td>
                         <td className="p-4 text-center">
                           <button
@@ -582,6 +622,25 @@ export default function ProductsDashboard({
                   <p className="text-[10px] text-slate-400 mt-1">Se suma con el precio de compra en materia prima.</p>
                 </div>
 
+                <div>
+                  <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">
+                    Stock Disponible (Calculado de Bodega)
+                  </label>
+                  <div className="relative">
+                    <span className="absolute left-4 top-3 text-slate-400 font-bold">Cant.</span>
+                    <input
+                      type="text"
+                      value={(() => {
+                        const tempProduct = { ...(editingProduct || {}), recipe: form.recipe } as MenuItem;
+                        return getProductStock(tempProduct);
+                      })()}
+                      readOnly
+                      className="w-full bg-slate-100 border border-slate-200 text-slate-600 rounded-xl pl-14 pr-4 py-3 text-sm font-bold focus:outline-none cursor-not-allowed opacity-80"
+                    />
+                  </div>
+                  <p className="text-[10px] text-slate-400 mt-1">Calculado según el ingrediente con menor disponibilidad en bodega.</p>
+                </div>
+
 
 
               </div>
@@ -733,6 +792,53 @@ export default function ProductsDashboard({
           </div>
         </div>
       )}
+      {/* Custom Alert Modal */}
+      <AnimatePresence>
+        {alertModal.isOpen && (
+          <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-[200] flex items-center justify-center p-4">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="bg-white rounded-3xl shadow-xl w-full max-w-md p-6 overflow-hidden relative"
+            >
+              <div className="flex flex-col items-center text-center">
+                {alertModal.type === "success" && (
+                  <div className="w-16 h-16 rounded-full bg-emerald-100 flex items-center justify-center text-emerald-600 mb-4">
+                    <CheckCircle className="w-10 h-10" />
+                  </div>
+                )}
+                {alertModal.type === "error" && (
+                  <div className="w-16 h-16 rounded-full bg-rose-100 flex items-center justify-center text-rose-600 mb-4">
+                    <XCircle className="w-10 h-10" />
+                  </div>
+                )}
+                {alertModal.type === "warning" && (
+                  <div className="w-16 h-16 rounded-full bg-amber-100 flex items-center justify-center text-amber-600 mb-4">
+                    <AlertCircle className="w-10 h-10" />
+                  </div>
+                )}
+                {alertModal.type === "info" && (
+                  <div className="w-16 h-16 rounded-full bg-blue-100 flex items-center justify-center text-blue-600 mb-4">
+                    <AlertCircle className="w-10 h-10" />
+                  </div>
+                )}
+
+                <h3 className="text-xl font-bold text-slate-800 mb-2">{alertModal.title}</h3>
+                <p className="text-slate-600 text-sm mb-6 whitespace-pre-wrap">{alertModal.message}</p>
+                
+                <button
+                  type="button"
+                  onClick={() => setAlertModal(prev => ({ ...prev, isOpen: false }))}
+                  className="w-full py-3 bg-slate-900 hover:bg-slate-800 text-white rounded-2xl font-bold text-sm transition-colors"
+                >
+                  Aceptar
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

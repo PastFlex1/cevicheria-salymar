@@ -1,10 +1,10 @@
 import React, { useState, useMemo, useEffect } from "react";
 import { Order, OrderItem, MenuItem, OrderStatus, Customer } from "../types";
-import { Search, Plus, Trash2, Printer, Download, Receipt, X, ArrowLeft, DollarSign, CreditCard, Wallet, User, CheckCircle, SearchCode } from "lucide-react";
+import { Search, Plus, Trash2, Printer, Download, Receipt, X, ArrowLeft, DollarSign, CreditCard, Wallet, User, CheckCircle, SearchCode, AlertCircle, XCircle } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import * as ExcelJS from "exceljs";
 import { saveAs } from "file-saver";
-import { validarDocumento } from "../lib/validators";
+import { validarDocumento, detectarTipoDocumento, obtenerNombreTipoDocumento, limpiarDocumento } from "../lib/validators";
 import Pagination from "./Pagination";
 
 export interface BillingDashboardProps {
@@ -16,6 +16,7 @@ export interface BillingDashboardProps {
   onClearInitialOrder?: () => void;
   customers: Customer[];
   setCustomers: React.Dispatch<React.SetStateAction<Customer[]>>;
+  onPrint?: (order: Order) => void;
 }
 
 export default function BillingDashboard({
@@ -27,8 +28,30 @@ export default function BillingDashboard({
   onClearInitialOrder,
   customers,
   setCustomers,
+  onPrint,
 }: BillingDashboardProps) {
   const [view, setView] = useState<"list" | "create">(initialOrderToBill ? "create" : "list");
+  
+  const [alertModal, setAlertModal] = useState<{
+    isOpen: boolean;
+    title: string;
+    message: string;
+    type: "info" | "success" | "error" | "warning";
+  }>({
+    isOpen: false,
+    title: "",
+    message: "",
+    type: "info"
+  });
+
+  const showAlert = (message: string, title = "Notificación", type: "info" | "success" | "error" | "warning" = "info") => {
+    setAlertModal({
+      isOpen: true,
+      title,
+      message,
+      type
+    });
+  };
   
   // Create Form State
   const [items, setItems] = useState<OrderItem[]>(initialOrderToBill ? initialOrderToBill.items : []);
@@ -45,7 +68,7 @@ export default function BillingDashboard({
     address: initialOrderToBill?.clientAddress || "",
   });
 
-  const validacionDoc = validarDocumento(clientForm.documentId === "9999999999999" ? "CONSUMIDOR_FINAL" : (clientForm.documentId.length === 10 ? "CEDULA" : (clientForm.documentId.length === 13 ? "RUC" : "PASAPORTE")), clientForm.documentId);
+  const validacionDoc = validarDocumento(detectarTipoDocumento(clientForm.documentId), clientForm.documentId);
 
   
   const [documentType, setDocumentType] = useState<"factura" | "nota">("factura");
@@ -53,6 +76,7 @@ export default function BillingDashboard({
   const [paymentMethod, setPaymentMethod] = useState<Order["paymentMethod"]>(initialOrderToBill?.paymentMethod || "Efectivo");
   const [cashReceived, setCashReceived] = useState<string>("");
   const [mixedPayments, setMixedPayments] = useState<{method: string, amount: number}[]>([]);
+  const [transactionNumber, setTransactionNumber] = useState<string>(initialOrderToBill?.transactionNumber || "");
   
   // Filtering for List View
   const [searchInvoice, setSearchInvoice] = useState("");
@@ -101,17 +125,17 @@ export default function BillingDashboard({
 
   const handleSaveInvoice = () => {
     if (items.length === 0) {
-      alert("No hay productos para facturar.");
+      showAlert("No hay productos para facturar.", "Sin Productos", "warning");
       return;
     }
     
     if (paymentMethod === "Mixto" && Math.abs(mixedTotal - total) > 0.01) {
-      alert("En pago mixto, la suma de los pagos debe ser igual al total.");
+      showAlert("En pago mixto, la suma de los pagos debe ser igual al total.", "Error de Monto", "error");
       return;
     }
 
     if (!validacionDoc.valido) {
-      alert("El documento del cliente no es válido: " + validacionDoc.mensaje);
+      showAlert("El documento del cliente no es válido: " + validacionDoc.mensaje, "Documento Inválido", "error");
       return;
     }
 
@@ -135,7 +159,7 @@ export default function BillingDashboard({
         return !isNaN(numId) && numId > max ? numId : max;
       }, 0);
       const nextIdNum = currentMaxId + 1;
-      newId = `$${nextIdNum.toString().padStart(6, "0")}`;
+      newId = `#${nextIdNum.toString().padStart(6, "0")}`;
     }
 
     const newInvoice: Order = {
@@ -157,6 +181,7 @@ export default function BillingDashboard({
       clientAddress: clientForm.address,
       paymentMethod,
       payments: paymentMethod === "Mixto" ? mixedPayments : [{ method: paymentMethod, amount: total }],
+      transactionNumber: paymentMethod === "Transferencia" ? transactionNumber : undefined,
       cashReceived: paymentMethod === "Efectivo" ? cashReceivedNum : undefined,
       changeReturned: change,
       relatedOrderId: initialOrderToBill?.id,
@@ -171,8 +196,8 @@ export default function BillingDashboard({
         const newCustomer = {
             id: "CUST-" + Date.now(),
             name: newInvoice.businessName || "Cliente",
-            documentType: newInvoice.ruc.length === 13 ? "RUC" : "Cédula",
-            documentNumber: newInvoice.ruc,
+            documentType: obtenerNombreTipoDocumento(detectarTipoDocumento(newInvoice.ruc)),
+            documentNumber: limpiarDocumento(newInvoice.ruc),
             phone: newInvoice.clientPhone || "",
             email: newInvoice.clientEmail || "",
             address: newInvoice.clientAddress || "",
@@ -188,6 +213,7 @@ export default function BillingDashboard({
     }
 
     addInvoice(newInvoice);
+    setTransactionNumber("");
 
     if (initialOrderToBill) {
       updateOrder({
@@ -197,7 +223,7 @@ export default function BillingDashboard({
       });
     }
 
-    alert(documentType === "factura" ? "Factura generada con éxito." : "Nota de venta generada con éxito.");
+    showAlert(documentType === "factura" ? "Factura generada con éxito." : "Nota de venta generada con éxito.", "Venta Completada", "success");
     setView("list");
     setItems([]);
     setClientForm({ documentId: "", businessName: "", phone: "", email: "", address: "" });
@@ -251,11 +277,15 @@ export default function BillingDashboard({
 
   // Download PDF simulation
   const downloadPdf = (inv: Order) => {
-    alert(`Descargando PDF de ${inv.id}...`);
+    showAlert(`Descargando PDF de ${inv.id}...`, "Descarga Iniciada", "info");
   };
 
   const printInvoice = (inv: Order) => {
-    alert(`Imprimiendo ${inv.id}...`);
+    if (onPrint) {
+      onPrint(inv);
+    } else {
+      showAlert(`Imprimiendo ${inv.id}...`, "Impresión Iniciada", "info");
+    }
   };
 
   return (
@@ -271,6 +301,7 @@ export default function BillingDashboard({
               if (onClearInitialOrder) onClearInitialOrder();
               setItems([]);
               setClientForm({ documentId: "", businessName: "", phone: "", email: "", address: "" });
+              setTransactionNumber("");
               setView("create");
             }}
             className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-xl text-sm flex items-center gap-2 shadow-sm shadow-blue-200 transition-colors"
@@ -532,7 +563,7 @@ export default function BillingDashboard({
                     value={clientForm.documentId}
                     onChange={(e) => {
                       const val = e.target.value;
-                      const existingCustomer = customers.find(c => c.documentNumber === val);
+                      const existingCustomer = customers.find(c => limpiarDocumento(c.documentNumber) === limpiarDocumento(val));
                       if (existingCustomer) {
                         setClientForm({
                           clientId: existingCustomer.id,
@@ -544,6 +575,23 @@ export default function BillingDashboard({
                         });
                       } else {
                         setClientForm({...clientForm, documentId: val, clientId: ""});
+                      }
+                    }}
+                    onBlur={(e) => {
+                      const val = e.target.value;
+                      const limpio = limpiarDocumento(val);
+                      const existingCustomer = customers.find(c => limpiarDocumento(c.documentNumber) === limpio);
+                      if (existingCustomer) {
+                        setClientForm({
+                          clientId: existingCustomer.id,
+                          documentId: existingCustomer.documentNumber,
+                          businessName: existingCustomer.name,
+                          phone: existingCustomer.phone || "",
+                          email: existingCustomer.email || "",
+                          address: existingCustomer.address || ""
+                        });
+                      } else if (limpio !== val) {
+                        setClientForm({...clientForm, documentId: limpio});
                       }
                     }}
                     placeholder="9999999999999"
@@ -743,6 +791,21 @@ export default function BillingDashboard({
                 ))}
               </div>
 
+              {paymentMethod === "Transferencia" && (
+                <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 space-y-3 mb-4">
+                  <div>
+                    <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Número de Comprobante</label>
+                    <input
+                      type="text"
+                      value={transactionNumber}
+                      onChange={(e) => setTransactionNumber(e.target.value)}
+                      placeholder="Ingrese el número de transferencia"
+                      className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-sm font-bold text-slate-800 outline-none focus:border-blue-500"
+                    />
+                  </div>
+                </div>
+              )}
+
               {paymentMethod === "Efectivo" && (
                 <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 space-y-3">
                   <div>
@@ -835,6 +898,53 @@ export default function BillingDashboard({
               <div className="flex gap-3">
                 <button onClick={() => setInvoiceToAnular(null)} className="flex-1 py-3 bg-slate-100 hover:bg-slate-200 rounded-xl font-bold text-sm">Cancelar</button>
                 <button onClick={handleAnular} disabled={!cancelReason} className="flex-1 py-3 bg-red-600 hover:bg-red-700 text-white rounded-xl font-bold text-sm disabled:opacity-50">Confirmar</button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+      {/* Custom Alert Modal */}
+      <AnimatePresence>
+        {alertModal.isOpen && (
+          <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-[200] flex items-center justify-center p-4">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="bg-white rounded-3xl shadow-xl w-full max-w-md p-6 overflow-hidden relative"
+            >
+              <div className="flex flex-col items-center text-center">
+                {alertModal.type === "success" && (
+                  <div className="w-16 h-16 rounded-full bg-emerald-100 flex items-center justify-center text-emerald-600 mb-4">
+                    <CheckCircle className="w-10 h-10" />
+                  </div>
+                )}
+                {alertModal.type === "error" && (
+                  <div className="w-16 h-16 rounded-full bg-rose-100 flex items-center justify-center text-rose-600 mb-4">
+                    <XCircle className="w-10 h-10" />
+                  </div>
+                )}
+                {alertModal.type === "warning" && (
+                  <div className="w-16 h-16 rounded-full bg-amber-100 flex items-center justify-center text-amber-600 mb-4">
+                    <AlertCircle className="w-10 h-10" />
+                  </div>
+                )}
+                {alertModal.type === "info" && (
+                  <div className="w-16 h-16 rounded-full bg-blue-100 flex items-center justify-center text-blue-600 mb-4">
+                    <AlertCircle className="w-10 h-10" />
+                  </div>
+                )}
+
+                <h3 className="text-xl font-bold text-slate-800 mb-2">{alertModal.title}</h3>
+                <p className="text-slate-600 text-sm mb-6 whitespace-pre-wrap">{alertModal.message}</p>
+                
+                <button
+                  type="button"
+                  onClick={() => setAlertModal(prev => ({ ...prev, isOpen: false }))}
+                  className="w-full py-3 bg-slate-900 hover:bg-slate-800 text-white rounded-2xl font-bold text-sm transition-colors"
+                >
+                  Aceptar
+                </button>
               </div>
             </motion.div>
           </div>

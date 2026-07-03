@@ -36,6 +36,13 @@ export default function CustomersDashboard({
 
   const filteredCustomers = useMemo(() => {
     return customers.filter((c) => {
+      if (
+        c.documentType === "Consumidor Final" ||
+        c.name === "Consumidor Final" ||
+        c.id === "CUST-DEFAULT"
+      ) {
+        return false;
+      }
       return (
         c.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
         c.documentNumber.includes(searchTerm) ||

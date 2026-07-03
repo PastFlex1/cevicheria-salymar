@@ -235,6 +235,7 @@ export default function ReportsDashboard({
       (acc, order) => {
         const name =
           order.customerName || order.businessName || "Consumidor Final";
+        if (name.toLowerCase() === "consumidor final") return acc;
         if (!acc[name])
           acc[name] = { total: 0, count: 0, lastDate: order.date };
         acc[name].total += order.total;
@@ -907,16 +908,16 @@ export default function ReportsDashboard({
               <div className="h-[350px]" ref={profitChartRef}>
                 {profitAndLossData.length > 0 ? (
                   <ResponsiveContainer width="100%" height="100%">
-                    <LineChart data={profitAndLossData}>
+                    <BarChart data={profitAndLossData}>
                       <CartesianGrid strokeDasharray="3 3" vertical={false} />
                       <XAxis dataKey="date" />
                       <YAxis tickFormatter={(v) => `$${v}`} />
                       <Tooltip formatter={(value: number) => formatCurrency(value)} />
                       <Legend />
-                      <Line type="monotone" dataKey="ingresos" name="Ingresos" stroke="#10b981" strokeWidth={3} activeDot={{ r: 8 }} />
-                      <Line type="monotone" dataKey="egresos" name="Egresos" stroke="#ef4444" strokeWidth={3} />
-                      <Line type="monotone" dataKey="utilidad" name="Utilidad" stroke="#3b82f6" strokeWidth={3} />
-                    </LineChart>
+                      <Bar dataKey="ingresos" name="Ingresos" fill="#10b981" radius={[4, 4, 0, 0]} />
+                      <Bar dataKey="egresos" name="Egresos" fill="#ef4444" radius={[4, 4, 0, 0]} />
+                      <Bar dataKey="utilidad" name="Utilidad" fill="#3b82f6" radius={[4, 4, 0, 0]} />
+                    </BarChart>
                   </ResponsiveContainer>
                 ) : (
                   <div className="h-full flex items-center justify-center text-slate-400">
@@ -1137,7 +1138,6 @@ export default function ReportsDashboard({
                 <thead className="bg-slate-50 text-slate-500">
                   <tr>
                     <th className="px-4 py-3 font-medium">Fecha</th>
-                    <th className="px-4 py-3 font-medium">ID Gasto</th>
                     <th className="px-4 py-3 font-medium">Categoría</th>
                     <th className="px-4 py-3 font-medium">Descripción</th>
                     <th className="px-4 py-3 font-medium text-right">Monto</th>
@@ -1148,9 +1148,6 @@ export default function ReportsDashboard({
                     <tr key={e.id} className="hover:bg-slate-50">
                       <td className="px-4 py-3 text-slate-600 whitespace-nowrap">
                         {new Date(e.date).toLocaleDateString()}
-                      </td>
-                      <td className="px-4 py-3 font-medium text-slate-500">
-                        {e.id}
                       </td>
                       <td className="px-4 py-3 font-medium text-slate-800">
                         <span className="px-2 py-1 rounded-md bg-purple-100 text-purple-700 text-xs">
@@ -1167,7 +1164,7 @@ export default function ReportsDashboard({
                   ))}
                   {filteredExpenses.length === 0 && (
                     <tr>
-                      <td colSpan={5} className="px-4 py-8 text-center text-slate-400">
+                      <td colSpan={4} className="px-4 py-8 text-center text-slate-400">
                         No hay egresos registrados.
                       </td>
                     </tr>

@@ -4,7 +4,7 @@ import { collection, doc, setDoc, deleteDoc, onSnapshot } from "firebase/firesto
 import * as ExcelJS from "exceljs";
 import { saveAs } from "file-saver";
 import { motion, AnimatePresence } from "motion/react";
-import { validarDocumento } from "./lib/validators";
+import { validarDocumento, detectarTipoDocumento, obtenerNombreTipoDocumento, limpiarDocumento } from "./lib/validators";
 import {
   Plus,
   Minus,
@@ -35,6 +35,7 @@ import {
   Trash2,
   BarChart3,
   AlertCircle,
+  XCircle,
   Download,
   ChefHat,
   PackageOpen,
@@ -116,6 +117,7 @@ export default function App() {
     address: "",
     paymentMethod: "Efectivo" as
       "Efectivo" | "Transferencia" | "Tarjeta" | "Crédito" | "Otro",
+    transactionNumber: "",
   });
   const [sriStatus, setSriStatus] = useState<
     "idle" | "signing" | "receiving" | "authorizing" | "done"
@@ -123,6 +125,29 @@ export default function App() {
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
   const [validationError, setValidationError] = useState<string | null>(null);
+  const [showCheckoutCustomerSearch, setShowCheckoutCustomerSearch] = useState(false);
+  const [checkoutCustomerSearchTerm, setCheckoutCustomerSearchTerm] = useState("");
+
+  const [alertModal, setAlertModal] = useState<{
+    isOpen: boolean;
+    title: string;
+    message: string;
+    type: "info" | "success" | "error" | "warning";
+  }>({
+    isOpen: false,
+    title: "",
+    message: "",
+    type: "info"
+  });
+
+  const showAlert = (message: string, title = "Notificación", type: "info" | "success" | "error" | "warning" = "info") => {
+    setAlertModal({
+      isOpen: true,
+      title,
+      message,
+      type
+    });
+  };
 
   const [categoriesSeeded, setCategoriesSeeded] = useState(false);
   const [customerSeeded, setCustomerSeeded] = useState(false);
@@ -181,7 +206,7 @@ export default function App() {
     quantity: "",
   });
 
-  const checkoutValidation = validarDocumento(checkoutForm.documentId === "9999999999999" ? "CONSUMIDOR_FINAL" : (checkoutForm.documentId.length === 10 ? "CEDULA" : (checkoutForm.documentId.length === 13 ? "RUC" : "PASAPORTE")), checkoutForm.documentId);
+  const checkoutValidation = validarDocumento(detectarTipoDocumento(checkoutForm.documentId), checkoutForm.documentId);
 
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -522,13 +547,30 @@ export default function App() {
   // Generate menu items from inventory
   const activeProducts = menuProducts.filter(p => p.status !== "inactivo");
   const menuItems: MenuItem[] = activeProducts.map((p) => {
-    let dynamicAvailable = p.stock || 999;
-    const isComida = inventoryComidas.find((c) => c.id === p.id);
-    if (isComida) dynamicAvailable = calculateMaxComidas(isComida);
-    const isBebida = inventoryBebidas.find((b) => b.id === p.id);
-    if (isBebida) dynamicAvailable = isBebida.quantity;
-    const isCombo = inventoryCombos.find((c) => c.id === p.id);
-    if (isCombo) dynamicAvailable = calculateMaxCombos(isCombo);
+    let dynamicAvailable = p.stock || 0;
+
+    if (p.recipe && p.recipe.length > 0) {
+      let maxPortions = Infinity;
+      for (const ing of p.recipe) {
+        const raw = inventoryItems.find((item) => item.id === ing.itemId);
+        if (!raw) {
+          maxPortions = 0;
+          break;
+        }
+        const portions = Math.floor(raw.quantity / ing.quantity);
+        if (portions < maxPortions) {
+          maxPortions = portions;
+        }
+      }
+      dynamicAvailable = maxPortions === Infinity ? 0 : maxPortions;
+    } else {
+      const isComida = inventoryComidas.find((c) => c.id === p.id);
+      if (isComida) dynamicAvailable = calculateMaxComidas(isComida);
+      const isBebida = inventoryBebidas.find((b) => b.id === p.id);
+      if (isBebida) dynamicAvailable = isBebida.quantity;
+      const isCombo = inventoryCombos.find((c) => c.id === p.id);
+      if (isCombo) dynamicAvailable = calculateMaxCombos(isCombo);
+    }
 
     return {
       ...p,
@@ -597,7 +639,7 @@ export default function App() {
       }
 
       if (!isStockSufficient) {
-        alert(`No hay suficiente stock de "${missingIngredient}" en la Bodega para preparar este producto.`);
+        showAlert(`No hay suficiente stock de "${missingIngredient}" en la Bodega para preparar este producto.`, "Stock Insuficiente", "warning");
         return;
       }
     }
@@ -706,6 +748,7 @@ export default function App() {
       phone: "",
       address: "",
       paymentMethod: "Efectivo",
+      transactionNumber: "",
     });
     setSriStatus("idle");
     setIsCheckoutModalOpen(true);
@@ -734,6 +777,7 @@ export default function App() {
       phone: "",
       address: "",
       paymentMethod: order.paymentMethod || "Efectivo",
+      transactionNumber: order.transactionNumber || "",
     });
     setTableNumber(order.tableNumber || "");
     setOrderType(order.orderType || "mesa");
@@ -755,6 +799,7 @@ export default function App() {
       phone: "",
       address: "",
       paymentMethod: order.paymentMethod || "Efectivo",
+      transactionNumber: order.transactionNumber || "",
     });
     setTableNumber(order.tableNumber || "");
     setOrderType(order.orderType || "mesa");
@@ -1170,7 +1215,7 @@ export default function App() {
       const nextIdStr = nextIdNum.toString().padStart(6, "0");
 
       const newOrder: Order = {
-        id: `$${nextIdStr}`,
+        id: `#${nextIdStr}`,
         items: [...cartItems],
         subtotal,
         tax,
@@ -1195,11 +1240,67 @@ export default function App() {
       phone: "",
       address: "",
       paymentMethod: "Efectivo",
+      transactionNumber: "",
     });
     setTableNumber("");
     setOrderType("mesa");
     setEditingOrderId(null);
     setActiveTab("Lista de Pedidos");
+  };
+
+  const handleSaveCheckoutCustomer = () => {
+    if (!checkoutForm.documentId || checkoutForm.documentId === "9999999999999") {
+      showAlert("Por favor ingrese una identificación válida (cédula, RUC o pasaporte).", "Identificación Inválida", "warning");
+      return;
+    }
+    if (!checkoutForm.businessName) {
+      showAlert("Por favor ingrese el nombre o razón social del cliente.", "Razón Social Requerida", "warning");
+      return;
+    }
+    
+    const validation = validarDocumento(detectarTipoDocumento(checkoutForm.documentId), checkoutForm.documentId);
+    if (!validation.valido) {
+      showAlert(`Documento inválido: ${validation.mensaje}`, "Validación Fallida", "error");
+      return;
+    }
+
+    const cleanDoc = limpiarDocumento(checkoutForm.documentId);
+    const existing = customers.find(c => limpiarDocumento(c.documentNumber) === cleanDoc);
+    
+    if (existing) {
+      const updated = customers.map(c => {
+        if (limpiarDocumento(c.documentNumber) === cleanDoc) {
+          return {
+            ...c,
+            name: checkoutForm.businessName,
+            phone: checkoutForm.phone,
+            email: checkoutForm.email,
+            address: checkoutForm.address,
+            updatedAt: new Date().toISOString()
+          };
+        }
+        return c;
+      });
+      setCustomers(updated);
+      showAlert("Cliente actualizado correctamente.", "Éxito", "success");
+    } else {
+      const newCustomer: Customer = {
+        id: "CUST-" + Date.now(),
+        name: checkoutForm.businessName,
+        documentType: obtenerNombreTipoDocumento(detectarTipoDocumento(checkoutForm.documentId)),
+        documentNumber: cleanDoc,
+        phone: checkoutForm.phone,
+        email: checkoutForm.email,
+        address: checkoutForm.address,
+        status: "activo",
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        totalPurchases: 0,
+        numberOfPurchases: 0
+      };
+      setCustomers(prev => [newCustomer, ...prev]);
+      showAlert("Cliente guardado correctamente.", "Éxito", "success");
+    }
   };
 
   const processTransaction = async (e?: React.FormEvent) => {
@@ -1215,7 +1316,7 @@ export default function App() {
     }
 
     if (documentType === "factura") {
-      const validacionDoc = validarDocumento(checkoutForm.documentId === "9999999999999" ? "CONSUMIDOR_FINAL" : (checkoutForm.documentId.length === 10 ? "CEDULA" : (checkoutForm.documentId.length === 13 ? "RUC" : "PASAPORTE")), checkoutForm.documentId);
+      const validacionDoc = validarDocumento(detectarTipoDocumento(checkoutForm.documentId), checkoutForm.documentId);
       if (!validacionDoc.valido) {
         setValidationError(`Documento inválido: ${validacionDoc.mensaje}`);
         return;
@@ -1236,13 +1337,13 @@ export default function App() {
     updateInventory(cartItems, false);
     
     if (documentType === "factura" && checkoutForm.documentId && checkoutForm.documentId !== "9999999999999") {
-      const existingCustomer = customers.find((c: any) => c.documentNumber === checkoutForm.documentId);
+      const existingCustomer = customers.find((c: any) => limpiarDocumento(c.documentNumber) === limpiarDocumento(checkoutForm.documentId));
       if (!existingCustomer) {
         const newCustomer: Customer = {
           id: "CUST-" + Date.now(),
           name: checkoutForm.businessName || "Cliente",
-          documentType: checkoutForm.documentId.length === 13 ? "RUC" : "Cédula",
-          documentNumber: checkoutForm.documentId,
+          documentType: obtenerNombreTipoDocumento(detectarTipoDocumento(checkoutForm.documentId)),
+          documentNumber: limpiarDocumento(checkoutForm.documentId),
           phone: checkoutForm.phone || "",
           email: checkoutForm.email || "",
           address: checkoutForm.address || "",
@@ -1257,10 +1358,11 @@ export default function App() {
     }
 
     if (editingOrderId) {
+      let updatedOrder: Order | null = null;
       setSalesNotes((prev) => 
         prev.map((order) => {
           if (order.id === editingOrderId) {
-            return {
+            updatedOrder = {
               ...order,
               items: [...cartItems],
               subtotal,
@@ -1276,11 +1378,14 @@ export default function App() {
               businessName:
                 documentType === "factura" ? checkoutForm.businessName : undefined,
               paymentMethod: checkoutForm.paymentMethod,
+              transactionNumber: checkoutForm.paymentMethod === "Transferencia" ? checkoutForm.transactionNumber : undefined,
             };
+            return updatedOrder;
           }
           return order;
         })
       );
+      if (updatedOrder) setPreviewOrder(updatedOrder);
     } else {
       const currentMaxId = salesNotes.reduce((max, note) => {
         const numId = parseInt(note.id.replace(/\D/g, ""), 10);
@@ -1290,7 +1395,7 @@ export default function App() {
       const nextIdStr = nextIdNum.toString().padStart(6, "0");
 
       const newOrder: Order = {
-        id: `$${nextIdStr}`,
+        id: `#${nextIdStr}`,
         items: [...cartItems],
         subtotal,
         tax,
@@ -1306,9 +1411,11 @@ export default function App() {
         businessName:
           documentType === "factura" ? checkoutForm.businessName : undefined,
         paymentMethod: checkoutForm.paymentMethod,
+        transactionNumber: checkoutForm.paymentMethod === "Transferencia" ? checkoutForm.transactionNumber : undefined,
       };
       
       setSalesNotes([newOrder, ...salesNotes]);
+      setPreviewOrder(newOrder);
     }
     setCartItems([]);
     setCheckoutForm({
@@ -1318,6 +1425,7 @@ export default function App() {
       phone: "",
       address: "",
       paymentMethod: "Efectivo",
+      transactionNumber: "",
     });
     setTableNumber("");
     setIsCheckoutModalOpen(false);
@@ -1910,6 +2018,7 @@ export default function App() {
                 customers={customers}
                 setCustomers={setCustomers}
                 salesNotes={salesNotes}
+                onPrint={(note) => setPreviewOrder(note)}
                 updateOrder={(updated) => {
                   setSalesNotes(prev => prev.map(o => o.id === updated.id ? updated : o));
                 }}
@@ -2504,14 +2613,85 @@ export default function App() {
                     Información del Comprador
                   </h3>
                   <div className="flex gap-3 shrink-0">
-                    <button className="flex items-center gap-2 px-4 py-2 rounded-full border border-slate-200 text-slate-600 text-sm font-bold hover:bg-slate-50 transition-colors">
+                    <button
+                      type="button"
+                      onClick={() => setShowCheckoutCustomerSearch(!showCheckoutCustomerSearch)}
+                      className="flex items-center gap-2 px-4 py-2 rounded-full border border-slate-200 text-slate-600 text-sm font-bold hover:bg-slate-50 transition-colors"
+                    >
                       <Search className="w-4 h-4" /> BUSCAR
                     </button>
-                    <button className="flex items-center gap-2 px-4 py-2 rounded-full border border-slate-200 text-blue-600 text-sm font-bold hover:bg-blue-50 transition-colors">
+                    <button
+                      type="button"
+                      onClick={handleSaveCheckoutCustomer}
+                      className="flex items-center gap-2 px-4 py-2 rounded-full border border-slate-200 text-blue-600 text-sm font-bold hover:bg-blue-50 transition-colors"
+                    >
                       <UserPlus className="w-4 h-4" /> GUARDAR
                     </button>
                   </div>
                 </div>
+
+                {showCheckoutCustomerSearch && (
+                  <div className="mb-6 p-4 bg-blue-50 rounded-2xl border border-blue-100 relative">
+                    <div className="relative">
+                      <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                      <input
+                        type="text"
+                        autoFocus
+                        placeholder="Buscar cliente por cédula, RUC o nombre..."
+                        value={checkoutCustomerSearchTerm}
+                        onChange={(e) => setCheckoutCustomerSearchTerm(e.target.value)}
+                        className="w-full pl-9 pr-4 py-2 rounded-lg border border-slate-200 text-sm focus:ring-2 focus:ring-blue-500 outline-none bg-white"
+                      />
+                    </div>
+                    {checkoutCustomerSearchTerm && (
+                      <div className="absolute z-20 left-4 right-4 mt-1 bg-white rounded-xl shadow-lg border border-slate-100 max-h-60 overflow-y-auto">
+                        {customers
+                          .filter(
+                            (c) =>
+                              c.status === "activo" &&
+                              c.documentType !== "Consumidor Final" &&
+                              (c.name.toLowerCase().includes(checkoutCustomerSearchTerm.toLowerCase()) ||
+                                c.documentNumber.includes(checkoutCustomerSearchTerm))
+                          )
+                          .map((c) => (
+                            <button
+                              key={c.id}
+                              type="button"
+                              onClick={() => {
+                                setCheckoutForm({
+                                  ...checkoutForm,
+                                  documentId: c.documentNumber,
+                                  businessName: c.name,
+                                  phone: c.phone || "",
+                                  email: c.email || "",
+                                  address: c.address || "",
+                                });
+                                setShowCheckoutCustomerSearch(false);
+                                setCheckoutCustomerSearchTerm("");
+                              }}
+                              className="w-full text-left px-4 py-3 hover:bg-slate-50 border-b border-slate-50 flex justify-between items-center"
+                            >
+                              <div>
+                                <p className="font-bold text-sm text-slate-800">{c.name}</p>
+                                <p className="text-xs text-slate-500">{c.documentNumber}</p>
+                              </div>
+                            </button>
+                          ))}
+                        {customers.filter(
+                          (c) =>
+                            c.status === "activo" &&
+                            c.documentType !== "Consumidor Final" &&
+                            (c.name.toLowerCase().includes(checkoutCustomerSearchTerm.toLowerCase()) ||
+                              c.documentNumber.includes(checkoutCustomerSearchTerm))
+                        ).length === 0 && (
+                          <div className="p-4 text-center text-sm text-slate-500">
+                            No se encontraron clientes.
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
 
                 <div className="flex flex-col gap-4 mb-6">
                   <div className="flex gap-4 p-4 bg-slate-50 rounded-2xl border border-slate-100">
@@ -2574,6 +2754,26 @@ export default function App() {
                       </label>
                     ))}
                   </div>
+
+                  {checkoutForm.paymentMethod === "Transferencia" && (
+                    <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100 mt-4">
+                      <label className="block text-[10px] font-bold text-slate-800 uppercase tracking-wider mb-2">
+                        Número de Comprobante / Transacción
+                      </label>
+                      <input
+                        type="text"
+                        value={checkoutForm.transactionNumber}
+                        onChange={(e) =>
+                          setCheckoutForm({
+                            ...checkoutForm,
+                            transactionNumber: e.target.value,
+                          })
+                        }
+                        placeholder="Ingrese el número de transferencia"
+                        className="w-full bg-white border border-slate-200 rounded-xl px-4 py-3 text-sm font-medium focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-shadow"
+                      />
+                    </div>
+                  )}
                 </div>
 
                 <form
@@ -2590,7 +2790,7 @@ export default function App() {
                         value={checkoutForm.documentId}
                         onChange={(e) => {
                           const val = e.target.value;
-                          const existingCustomer = customers.find((c: any) => c.documentNumber === val);
+                          const existingCustomer = customers.find((c: any) => limpiarDocumento(c.documentNumber) === limpiarDocumento(val));
                           if (existingCustomer) {
                             setCheckoutForm({
                               ...checkoutForm,
@@ -2604,6 +2804,26 @@ export default function App() {
                             setCheckoutForm({
                               ...checkoutForm,
                               documentId: val,
+                            });
+                          }
+                        }}
+                        onBlur={(e) => {
+                          const val = e.target.value;
+                          const limpio = limpiarDocumento(val);
+                          const existingCustomer = customers.find((c: any) => limpiarDocumento(c.documentNumber) === limpio);
+                          if (existingCustomer) {
+                            setCheckoutForm({
+                              ...checkoutForm,
+                              documentId: existingCustomer.documentNumber,
+                              businessName: existingCustomer.name,
+                              phone: existingCustomer.phone || "",
+                              email: existingCustomer.email || "",
+                              address: existingCustomer.address || ""
+                            });
+                          } else if (limpio !== val) {
+                            setCheckoutForm({
+                              ...checkoutForm,
+                              documentId: limpio,
                             });
                           }
                         }}
@@ -3571,7 +3791,8 @@ export default function App() {
                 >
                   <X className="w-4 h-4" />
                 </button>
-                <div className="text-center mb-6">
+                <div id="ticket-print-area">
+                  <div className="text-center mb-6">
                   <h3 className="font-bold text-lg text-slate-800">
                     {previewOrder.documentType === "factura"
                       ? "FACTURA ELECTRÓNICA"
@@ -3685,8 +3906,9 @@ export default function App() {
                     </span>
                   </div>
                 </div>
+              </div>
 
-                <button
+              <button
                   onClick={() => window.print()}
                   className="w-full bg-slate-900 text-white font-bold py-3.5 rounded-xl hover:bg-slate-800 transition-colors flex items-center justify-center gap-2"
                 >
@@ -3838,6 +4060,53 @@ export default function App() {
               >
                 Entendido
               </button>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+      {/* Custom Alert Modal */}
+      <AnimatePresence>
+        {alertModal.isOpen && (
+          <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-[200] flex items-center justify-center p-4">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="bg-white rounded-3xl shadow-xl w-full max-w-md p-6 overflow-hidden relative"
+            >
+              <div className="flex flex-col items-center text-center">
+                {alertModal.type === "success" && (
+                  <div className="w-16 h-16 rounded-full bg-emerald-100 flex items-center justify-center text-emerald-600 mb-4">
+                    <CheckCircle className="w-10 h-10" />
+                  </div>
+                )}
+                {alertModal.type === "error" && (
+                  <div className="w-16 h-16 rounded-full bg-rose-100 flex items-center justify-center text-rose-600 mb-4">
+                    <XCircle className="w-10 h-10" />
+                  </div>
+                )}
+                {alertModal.type === "warning" && (
+                  <div className="w-16 h-16 rounded-full bg-amber-100 flex items-center justify-center text-amber-600 mb-4">
+                    <AlertCircle className="w-10 h-10" />
+                  </div>
+                )}
+                {alertModal.type === "info" && (
+                  <div className="w-16 h-16 rounded-full bg-blue-100 flex items-center justify-center text-blue-600 mb-4">
+                    <AlertCircle className="w-10 h-10" />
+                  </div>
+                )}
+
+                <h3 className="text-xl font-bold text-slate-800 mb-2">{alertModal.title}</h3>
+                <p className="text-slate-600 text-sm mb-6 whitespace-pre-wrap">{alertModal.message}</p>
+                
+                <button
+                  type="button"
+                  onClick={() => setAlertModal(prev => ({ ...prev, isOpen: false }))}
+                  className="w-full py-3 bg-slate-900 hover:bg-slate-800 text-white rounded-2xl font-bold text-sm transition-colors"
+                >
+                  Aceptar
+                </button>
+              </div>
             </motion.div>
           </div>
         )}

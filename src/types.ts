@@ -69,6 +69,7 @@ export interface Order {
   payments?: { method: string; amount: number }[];
   cashReceived?: number;
   changeReturned?: number;
+  transactionNumber?: string;
   observation?: string;
   createdBy?: string;
   cancelReason?: string;

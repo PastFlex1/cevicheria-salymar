@@ -250,6 +250,43 @@ export function validarPasaporte(documento: string): ValidationResult {
 
 export type TipoDocumento = "CEDULA" | "RUC" | "PASAPORTE" | "CONSUMIDOR_FINAL" | "Cédula" | "Pasaporte" | "Consumidor Final";
 
+export function detectarTipoDocumento(documento: string): TipoDocumento {
+  const limpio = limpiarDocumento(documento);
+  if (!limpio) return "CEDULA";
+  if (limpio === "9999999999999") {
+    return "CONSUMIDOR_FINAL";
+  }
+  
+  // Si contiene solo dígitos, se trata como Cédula (si es corto) o RUC (si es largo)
+  if (/^\d+$/.test(limpio)) {
+    if (limpio.length <= 10) {
+      return "CEDULA";
+    } else {
+      return "RUC";
+    }
+  }
+  
+  // Si contiene letras u otros caracteres, se trata como Pasaporte
+  return "PASAPORTE";
+}
+
+export function obtenerNombreTipoDocumento(tipo: TipoDocumento | string): "Cédula" | "RUC" | "Pasaporte" | "Consumidor Final" {
+  switch (tipo) {
+    case "CEDULA":
+    case "Cédula":
+      return "Cédula";
+    case "RUC":
+      return "RUC";
+    case "PASAPORTE":
+    case "Pasaporte":
+      return "Pasaporte";
+    case "CONSUMIDOR_FINAL":
+    case "Consumidor Final":
+    default:
+      return "Consumidor Final";
+  }
+}
+
 export function validarDocumento(tipoDocumento: TipoDocumento | string, numeroDocumento: string): ValidationResult {
   const limpio = limpiarDocumento(numeroDocumento);
   
@@ -275,9 +312,7 @@ export function validarDocumento(tipoDocumento: TipoDocumento | string, numeroDo
       return validarPasaporte(limpio);
     default:
       // Si el tipo es genérico y no está especificado, intentamos adivinar.
-      if (limpio === "9999999999999") return { valido: true, tipo: "CONSUMIDOR_FINAL", mensaje: "Consumidor final válido." };
-      if (limpio.length === 10 && /^\d+$/.test(limpio)) return validarCedula(limpio);
-      if (limpio.length === 13 && /^\d+$/.test(limpio)) return validarRuc(limpio);
-      return validarPasaporte(limpio); // Fallback
+      const tipoDetectado = detectarTipoDocumento(limpio);
+      return validarDocumento(tipoDetectado, limpio);
   }
 }
