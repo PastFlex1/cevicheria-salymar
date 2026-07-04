@@ -31,42 +31,76 @@
 
 /* Print styles for thermal printer (POS-80 or POS-58) */
 @media print {
-  /* Set zero margins for the page to avoid headers/footers */
+  /* Set zero margins for the page to avoid browser-added headers/footers */
   @page {
     margin: 0;
   }
 
-  /* Hide everything on the page */
-  body * {
-    visibility: hidden !important;
+  /* Reset html, body margins and height to allow normal flow */
+  html, body {
     margin: 0 !important;
     padding: 0 !important;
+    height: auto !important;
+    min-height: 100% !important;
+    overflow: visible !important;
+    background-color: #fff !important;
   }
 
-  /* Display only the receipt container and force it to fill the roll width */
+  /* Hide everything on the page by default */
+  body * {
+    visibility: hidden !important;
+  }
+
+  /* Display only the receipt container and force it to be visible */
   #ticket-print-area,
-  #ticket-print-area * {
+  #ticket-print-area *,
+  #cierre-print-area,
+  #cierre-print-area * {
     visibility: visible !important;
   }
 
-  #ticket-print-area {
+  /* Position the print area at the top-left of the page and let it flow normally */
+  #ticket-print-area,
+  #cierre-print-area {
     position: absolute !important;
     left: 0 !important;
     top: 0 !important;
     width: 100% !important;
-    max-width: 76mm !important; /* POS-80 printable width is ~72-76mm, POS-58 will scale down automatically to 100% of its smaller width */
+    max-width: 76mm !important; /* POS-80 printable width is ~72-76mm, POS-58 scales down automatically */
     margin: 0 !important;
-    padding: 4mm 1.5mm !important;
+    padding: 4mm 2mm !important;
     box-sizing: border-box !important;
     font-family: 'Arial', 'Helvetica', 'system-ui', sans-serif !important;
-    font-size: 10px !important; /* Adjusted from 11px to fit product names better on 58mm rolls */
-    line-height: 1.25 !important;
+    font-size: 11px !important; /* Adjusted to fit names well */
+    line-height: 1.3 !important;
     color: #000 !important;
     background: #fff !important;
+    overflow: visible !important;
+    height: auto !important;
+  }
+
+  /* Ensure parent modal/animation wrappers do not clip or restrict the ticket size */
+  div:has(#ticket-print-area),
+  section:has(#ticket-print-area),
+  main:has(#ticket-print-area),
+  dialog:has(#ticket-print-area),
+  div:has(#cierre-print-area),
+  section:has(#cierre-print-area),
+  main:has(#cierre-print-area),
+  dialog:has(#cierre-print-area) {
+    position: static !important; /* breaks out of relative/absolute containing blocks */
+    overflow: visible !important;
+    height: auto !important;
+    max-height: none !important;
+    transform: none !important;
+    opacity: 1 !important;
+    box-shadow: none !important;
+    background: transparent !important;
   }
 
   /* Headers and alignment */
-  #ticket-print-area h3 {
+  #ticket-print-area h3,
+  #cierre-print-area h3 {
     font-size: 13px !important;
     font-weight: bold !important;
     text-align: center !important;
@@ -74,14 +108,16 @@
     text-transform: uppercase !important;
   }
 
-  #ticket-print-area p {
+  #ticket-print-area p,
+  #cierre-print-area p {
     text-align: center !important;
     font-size: 10px !important;
     margin: 0 0 8px 0 !important;
   }
 
   /* Divider lines for thermal paper */
-  #ticket-print-area .border-b.border-dashed {
+  #ticket-print-area .border-b.border-dashed,
+  #cierre-print-area .border-b.border-dashed {
     border-bottom: 1.5px dashed #000 !important;
     margin-top: 6px !important;
     margin-bottom: 6px !important;
@@ -89,60 +125,52 @@
   }
 
   /* Specific typography styling for high contrast printing */
-  #ticket-print-area .font-bold {
+  #ticket-print-area .font-bold,
+  #cierre-print-area .font-bold {
     font-weight: bold !important;
   }
-  #ticket-print-area .text-slate-500 {
-    color: #000 !important;
-  }
-  #ticket-print-area .text-slate-600 {
-    color: #000 !important;
-  }
-  #ticket-print-area .text-slate-700 {
-    color: #000 !important;
-  }
-  #ticket-print-area .text-slate-800 {
-    color: #000 !important;
-  }
-  #ticket-print-area .text-blue-600 {
+  #ticket-print-area .text-slate-500,
+  #ticket-print-area .text-slate-600,
+  #ticket-print-area .text-slate-700,
+  #ticket-print-area .text-slate-800,
+  #ticket-print-area .text-blue-600,
+  #cierre-print-area .text-slate-500,
+  #cierre-print-area .text-slate-600,
+  #cierre-print-area .text-slate-700,
+  #cierre-print-area .text-slate-800,
+  #cierre-print-area .text-rose-600,
+  #cierre-print-area .text-emerald-600 {
     color: #000 !important;
   }
 
   /* Layout grids and tables */
-  #ticket-print-area .flex {
+  #ticket-print-area .flex,
+  #cierre-print-area .flex {
     display: flex !important;
     flex-direction: row !important;
     justify-content: space-between !important;
     width: 100% !important;
-    margin-bottom: 3px !important;
   }
 
-  #ticket-print-area .space-y-4 > * {
-    margin-bottom: 4px !important;
-  }
-
-  #ticket-print-area .space-y-3 > * {
-    margin-bottom: 3px !important;
-  }
-
-  #ticket-print-area .space-y-2 > * {
-    margin-bottom: 2px !important;
-  }
-
-  #ticket-print-area .flex-1 {
+  #ticket-print-area .flex-1,
+  #cierre-print-area .flex-1 {
     flex: 1 !important;
   }
 
-  #ticket-print-area .w-8 {
+  #ticket-print-area .w-8,
+  #cierre-print-area .w-8 {
     width: 25px !important;
   }
 
-  #ticket-print-area .w-20 {
+  #ticket-print-area .w-20,
+  #cierre-print-area .w-20 {
     width: 60px !important;
     text-align: right !important;
   }
 
-  #ticket-print-area .text-right {
+  #ticket-print-area .text-right,
+  #cierre-print-area .text-right {
     text-align: right !important;
   }
 }
+

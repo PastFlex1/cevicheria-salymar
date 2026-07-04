@@ -3,6 +3,7 @@ import { MenuItem, Category, InventoryItem, RecipeIngredient } from "../types";
 import { Search, Plus, Edit2, Trash2, CheckCircle, XCircle, Package, Tag, Archive, Image as ImageIcon, Check, X, AlertCircle } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import Pagination from "./Pagination";
+import { getInitials, getProductColor, hasImage } from "../lib/utils";
 
 interface ProductsDashboardProps {
   products: MenuItem[];
@@ -200,7 +201,7 @@ export default function ProductsDashboard({
       price: parseFloat(form.price) || 0,
       cost: parseFloat(finalCost) || 0,
       aplicaIva: form.aplicaIva,
-      image: form.image || "https://images.unsplash.com/photo-1546069901-ba9599a7e63c",
+      image: form.image || "",
       available: parseInt(form.stock) || 0,
       sold: editingProduct?.sold || 0,
       status: form.status,
@@ -370,11 +371,11 @@ export default function ProductsDashboard({
                       <tr key={p.id} className={`border-b border-slate-50 hover:bg-slate-50 transition-colors ${p.status === 'inactivo' ? 'opacity-70' : ''}`}>
                         <td className="p-4">
                           <div className="flex items-center gap-3">
-                            {p.image ? (
+                            {hasImage(p.image) ? (
                               <img src={p.image} alt={p.name} className="w-10 h-10 rounded-lg object-cover bg-slate-100" />
                             ) : (
-                              <div className="w-10 h-10 rounded-lg bg-slate-100 flex items-center justify-center">
-                                <ImageIcon className="w-5 h-5 text-slate-400" />
+                              <div className={`w-10 h-10 rounded-lg bg-gradient-to-br ${getProductColor(p.name)} flex items-center justify-center font-bold text-[11px] shadow-sm select-none`}>
+                                {getInitials(p.name)}
                               </div>
                             )}
                             <div>
@@ -431,11 +432,11 @@ export default function ProductsDashboard({
                     className={`bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden flex flex-col transition-all hover:shadow-md ${p.status === 'inactivo' ? 'opacity-70 grayscale-[0.3]' : ''}`}
                   >
                     <div className="h-40 bg-slate-100 relative">
-                      {p.image ? (
+                      {hasImage(p.image) ? (
                         <img src={p.image} alt={p.name} className="w-full h-full object-cover" />
                       ) : (
-                        <div className="w-full h-full flex items-center justify-center">
-                          <ImageIcon className="w-10 h-10 text-slate-300" />
+                        <div className={`w-full h-full bg-gradient-to-br ${getProductColor(p.name)} flex items-center justify-center font-extrabold text-3xl shadow-inner select-none`}>
+                          {getInitials(p.name)}
                         </div>
                       )}
                       <div className="absolute top-3 right-3 flex gap-2">
@@ -510,7 +511,7 @@ export default function ProductsDashboard({
                   htmlFor="product-image-upload"
                   className={`w-full aspect-square rounded-2xl border-2 border-dashed flex flex-col items-center justify-center overflow-hidden relative group cursor-pointer transition-all ${isDragging ? 'bg-indigo-50 border-indigo-400' : 'bg-slate-100 border-slate-200 hover:bg-slate-50'}`}
                 >
-                  {form.image ? (
+                  {hasImage(form.image) ? (
                     <>
                       <img src={form.image} alt="Preview" className="w-full h-full object-cover" />
                       <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center pointer-events-none">
@@ -519,10 +520,13 @@ export default function ProductsDashboard({
                     </>
                   ) : (
                     <>
-                      <ImageIcon className={`w-12 h-12 mb-3 transition-colors ${isDragging ? 'text-indigo-400' : 'text-slate-300'}`} />
-                      <span className={`text-sm font-medium text-center px-4 transition-colors ${isDragging ? 'text-indigo-600' : 'text-slate-400'}`}>
-                        {isDragging ? 'Suelta la imagen aquí' : 'Haz clic o arrastra una imagen aquí'}
-                      </span>
+                      <div className={`absolute inset-0 bg-gradient-to-br ${getProductColor(form.name || "Nuevo Producto")} flex items-center justify-center font-extrabold text-4xl shadow-inner select-none opacity-80 group-hover:opacity-50 transition-opacity`}>
+                        {getInitials(form.name)}
+                      </div>
+                      <div className="absolute inset-0 bg-black/10 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center text-white p-4">
+                        <ImageIcon className="w-10 h-10 mb-2" />
+                        <span className="font-bold text-xs text-center">{isDragging ? 'Suelta la imagen aquí' : 'Subir o arrastrar imagen'}</span>
+                      </div>
                     </>
                   )}
                   <input

@@ -23,5 +23,12 @@
     "allowImportingTsExtensions": true,
     "noEmit": true
   },
-  "exclude": ["*.cjs", "**/*.test.ts", "**/*.test.tsx"]
+  "include": ["src/**/*"],
+  "exclude": [
+    "node_modules",
+    "dist",
+    "*.cjs",
+    "**/*.test.ts",
+    "**/*.test.tsx"
+  ]
 }

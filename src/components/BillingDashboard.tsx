@@ -226,7 +226,7 @@ export default function BillingDashboard({
     showAlert(documentType === "factura" ? "Factura generada con éxito." : "Nota de venta generada con éxito.", "Venta Completada", "success");
     setView("list");
     setItems([]);
-    setClientForm({ documentId: "", businessName: "", phone: "", email: "", address: "" });
+    setClientForm({ clientId: "", documentId: "", businessName: "", phone: "", email: "", address: "" });
     setDiscount(0);
     setCashReceived("");
     setMixedPayments([]);
@@ -258,11 +258,13 @@ export default function BillingDashboard({
                 (inv.ruc || "").toLowerCase().includes(q);
       }
       if (match && filterDateFrom) {
-        match = new Date(inv.date) >= new Date(filterDateFrom);
+        const [year, month, day] = filterDateFrom.split("-");
+        const fromDate = new Date(parseInt(year), parseInt(month) - 1, parseInt(day), 0, 0, 0, 0);
+        match = new Date(inv.date) >= fromDate;
       }
       if (match && filterDateTo) {
-        const toDate = new Date(filterDateTo);
-        toDate.setHours(23, 59, 59, 999);
+        const [year, month, day] = filterDateTo.split("-");
+        const toDate = new Date(parseInt(year), parseInt(month) - 1, parseInt(day), 23, 59, 59, 999);
         match = new Date(inv.date) <= toDate;
       }
       return match;
@@ -300,7 +302,7 @@ export default function BillingDashboard({
             onClick={() => {
               if (onClearInitialOrder) onClearInitialOrder();
               setItems([]);
-              setClientForm({ documentId: "", businessName: "", phone: "", email: "", address: "" });
+              setClientForm({ clientId: "", documentId: "", businessName: "", phone: "", email: "", address: "" });
               setTransactionNumber("");
               setView("create");
             }}

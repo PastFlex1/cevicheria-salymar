@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useMemo } from "react";
 import { db } from "./firebase";
 import { collection, doc, setDoc, deleteDoc, onSnapshot } from "firebase/firestore";
 import * as ExcelJS from "exceljs";
@@ -40,7 +40,9 @@ import {
   ChefHat,
   PackageOpen,
   Users,
+  Calculator,
 } from "lucide-react";
+import CashDashboard, { CashSession } from "./components/CashDashboard";
 import {
   CATEGORIES,
   INVENTORY_ITEMS,
@@ -84,6 +86,8 @@ import OrdersManager from "./components/OrdersManager";
 import BillingDashboard from "./components/BillingDashboard";
 import ProductsDashboard from "./components/ProductsDashboard";
 import CustomersDashboard from "./components/CustomersDashboard";
+import Pagination from "./components/Pagination";
+import { getInitials, getProductColor, hasImage } from "./lib/utils";
 
 // Utility for currency formatting
 const formatCurrency = (value: number) => {
@@ -116,7 +120,7 @@ export default function App() {
     phone: "",
     address: "",
     paymentMethod: "Efectivo" as
-      "Efectivo" | "Transferencia" | "Tarjeta" | "Crédito" | "Otro",
+      "Efectivo" | "Transferencia" | "Tarjeta" | "Crédito" | "Mixto" | "Otro",
     transactionNumber: "",
   });
   const [sriStatus, setSriStatus] = useState<
@@ -177,6 +181,8 @@ export default function App() {
   const [inventoryTab, setInventoryTab] = useState<
     "Materia Prima" | "Comidas" | "Bebidas" | "Combos"
   >("Materia Prima");
+  const [inventoryPage, setInventoryPage] = useState(1);
+  const inventoryItemsPerPage = 10;
   const [inventoryItems, setInventoryItemsState] = useState<InventoryItem[]>([]);
   const [inventoryComidas, setInventoryComidasState] = useState<ComidaItem[]>([]);
   const [inventoryBebidas, setInventoryBebidasState] = useState<InventoryItem[]>([]);
@@ -186,6 +192,9 @@ export default function App() {
   const [inventoryCombos, setInventoryCombosState] = useState<ComboItem[]>([]);
   const [salesNotes, setSalesNotesState] = useState<Order[]>([]);
   const [customers, setCustomersState] = useState<Customer[]>([]);
+  const [activeSession, setActiveSessionState] = useState<CashSession | null>(null);
+  const [previewClosingReport, setPreviewClosingReport] = useState<any | null>(null);
+  const [cashClosings, setCashClosingsState] = useState<any[]>([]);
 
   const [isInventoryModalOpen, setIsInventoryModalOpen] = useState(false);
   const [newItemForm, setNewItemForm] = useState({
@@ -247,6 +256,16 @@ export default function App() {
     const unsubCustomers = onSnapshot(collection(db, "customers"), (snapshot) => {
       setCustomersState(snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as Customer)));
     });
+    const unsubCashSession = onSnapshot(doc(db, "cashSessions", "active"), (snapshot) => {
+      if (snapshot.exists()) {
+        setActiveSessionState(snapshot.data() as CashSession);
+      } else {
+        setActiveSessionState(null);
+      }
+    });
+    const unsubCashClosings = onSnapshot(collection(db, "cashClosings"), (snapshot) => {
+      setCashClosingsState(snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id })));
+    });
 
     return () => {
       unsubProviders();
@@ -259,6 +278,8 @@ export default function App() {
       unsubProducts();
       unsubSalesNotes();
       unsubCustomers();
+      unsubCashSession();
+      unsubCashClosings();
     };
   }, []);
 
@@ -607,40 +628,56 @@ export default function App() {
 
   const updateQuantity = (menuItem: MenuItem, delta: number) => {
     // Validar inventario si se agrega al carrito
-    if (delta > 0 && menuItem.recipe && menuItem.recipe.length > 0) {
-      let isStockSufficient = true;
-      let missingIngredient = "";
+    if (delta > 0) {
+      if (menuItem.recipe && menuItem.recipe.length > 0) {
+        let isStockSufficient = true;
+        let missingIngredient = "";
 
-      for (const ing of menuItem.recipe) {
-        const raw = inventoryItems.find((r) => r.id === ing.itemId);
-        if (raw) {
-          let totalRequiredInCart = 0;
-          for (const cItem of cartItems) {
-            if (cItem.menuItem.id === menuItem.id) {
-              totalRequiredInCart += ing.quantity * (cItem.quantity + delta);
-            } else if (cItem.menuItem.recipe) {
-              const matchingIng = cItem.menuItem.recipe.find(r => r.itemId === ing.itemId);
-              if (matchingIng) {
-                totalRequiredInCart += matchingIng.quantity * cItem.quantity;
+        for (const ing of menuItem.recipe) {
+          const raw = inventoryItems.find((r) => r.id === ing.itemId);
+          if (raw) {
+            let totalRequiredInCart = 0;
+            for (const cItem of cartItems) {
+              if (cItem.menuItem.id === menuItem.id) {
+                totalRequiredInCart += ing.quantity * (cItem.quantity + delta);
+              } else if (cItem.menuItem.recipe) {
+                const matchingIng = cItem.menuItem.recipe.find(r => r.itemId === ing.itemId);
+                if (matchingIng) {
+                  totalRequiredInCart += matchingIng.quantity * cItem.quantity;
+                }
               }
             }
-          }
-          
-          if (!cartItems.some(cItem => cItem.menuItem.id === menuItem.id)) {
-            totalRequiredInCart += ing.quantity * delta;
-          }
+            
+            if (!cartItems.some(cItem => cItem.menuItem.id === menuItem.id)) {
+              totalRequiredInCart += ing.quantity * delta;
+            }
 
-          if (totalRequiredInCart > raw.quantity) {
-            isStockSufficient = false;
-            missingIngredient = raw.name;
-            break;
+            if (totalRequiredInCart > raw.quantity) {
+              isStockSufficient = false;
+              missingIngredient = raw.name;
+              break;
+            }
           }
         }
-      }
 
-      if (!isStockSufficient) {
-        showAlert(`No hay suficiente stock de "${missingIngredient}" en la Bodega para preparar este producto.`, "Stock Insuficiente", "warning");
-        return;
+        if (!isStockSufficient) {
+          showAlert(`No hay suficiente stock de "${missingIngredient}" en la Bodega para preparar este producto.`, "Stock Insuficiente", "warning");
+          return;
+        }
+      } else {
+        // Validar stock para productos directos y bebidas (sin receta)
+        const existingInCart = cartItems.find((item) => item.menuItem.id === menuItem.id);
+        const currentCartQty = existingInCart ? existingInCart.quantity : 0;
+        const newCartQty = currentCartQty + delta;
+
+        // Obtener el stock disponible calculado dinámicamente
+        const calculatedItem = menuItems.find(item => item.id === menuItem.id);
+        const availableStock = calculatedItem ? calculatedItem.available : 0;
+
+        if (newCartQty > availableStock) {
+          showAlert(`No hay suficiente stock de "${menuItem.name}" en la Bodega. Stock disponible: ${availableStock}.`, "Stock Insuficiente", "warning");
+          return;
+        }
       }
     }
 
@@ -752,6 +789,78 @@ export default function App() {
     });
     setSriStatus("idle");
     setIsCheckoutModalOpen(true);
+  };
+
+  const handleOpenSession = async (openingBalance: number) => {
+    try {
+      const sessionId = "SESS-" + Date.now();
+      await setDoc(doc(db, "cashSessions", "active"), {
+        id: sessionId,
+        status: "open",
+        openedBy: "Administrador",
+        openTime: new Date().toISOString(),
+        openingBalance,
+      });
+      showAlert("Caja abierta con éxito.", "Apertura de Caja", "success");
+    } catch (e: any) {
+      showAlert("Error al abrir caja: " + e.message, "Error", "error");
+    }
+  };
+
+  const handleCloseSession = async (
+    actualCash: number,
+    actualTransfers: number,
+    differenceCash: number,
+    differenceTransfers: number,
+    notes: string,
+    totals: any
+  ) => {
+    if (!activeSession) return;
+    try {
+      const closingId = "CLOSE-" + Date.now();
+      const closingReport = {
+        id: closingId,
+        openTime: activeSession.openTime,
+        closeTime: new Date().toISOString(),
+        openedBy: activeSession.openedBy,
+        closedBy: "Administrador",
+        openingBalance: totals.openingBalance,
+        cashSales: totals.cashSales,
+        transferSales: totals.transferSales,
+        cardSales: totals.cardSales,
+        creditSales: totals.creditSales,
+        expenses: totals.expenses,
+        expectedCash: totals.expectedCash,
+        actualCash,
+        actualTransfers,
+        differenceCash,
+        differenceTransfers,
+        notes,
+      };
+
+      await setDoc(doc(db, "cashClosings", closingId), closingReport);
+      await deleteDoc(doc(db, "cashSessions", "active"));
+
+      setPreviewClosingReport({
+        ...closingReport,
+        isClosing: true,
+      });
+
+      showAlert("Caja cerrada con éxito. Imprimiendo Reporte.", "Cierre de Caja", "success");
+    } catch (e: any) {
+      showAlert("Error al cerrar caja: " + e.message, "Error", "error");
+    }
+  };
+
+  const handlePrintReport = (isClosing: boolean, reportTotals: any) => {
+    setPreviewClosingReport({
+      ...reportTotals,
+      isClosing,
+      openTime: activeSession?.openTime || new Date().toISOString(),
+      closeTime: new Date().toISOString(),
+      openedBy: activeSession?.openedBy || "Administrador",
+      closedBy: "Administrador",
+    });
   };
 
   const updateOrderStatus = (orderId: string, newStatus: OrderStatus, cancelReason?: string) => {
@@ -1127,7 +1236,7 @@ export default function App() {
     filteredExpensesList.forEach((e) => {
       const row = wsEgresos.addRow({
         fecha: new Date(e.date).toLocaleString(),
-        concepto: e.concept,
+        concepto: e.description,
         categoria: e.category,
         monto: e.amount,
       });
@@ -1636,6 +1745,22 @@ export default function App() {
     }
   };
 
+  const currentInventoryCollection = useMemo(() => {
+    if (inventoryTab === "Materia Prima") return inventoryItems;
+    if (inventoryTab === "Bebidas") return inventoryBebidas;
+    if (inventoryTab === "Comidas") return inventoryComidas;
+    return inventoryCombos;
+  }, [inventoryTab, inventoryItems, inventoryBebidas, inventoryComidas, inventoryCombos]);
+
+  const totalInventoryPages = Math.ceil(currentInventoryCollection.length / inventoryItemsPerPage);
+  const paginatedInventoryItems = useMemo(() => {
+    return currentInventoryCollection.slice((inventoryPage - 1) * inventoryItemsPerPage, inventoryPage * inventoryItemsPerPage);
+  }, [currentInventoryCollection, inventoryPage]);
+
+  useEffect(() => {
+    setInventoryPage(1);
+  }, [inventoryTab]);
+
   if (isLoading) {
     return (
       <div className="min-h-screen bg-[#f4f7fe] flex flex-col items-center justify-center font-sans">
@@ -1705,11 +1830,11 @@ export default function App() {
             {[
               { id: "Dashboard", icon: LayoutGrid, label: "Nuevo Pedido" },
               { id: "Lista de Pedidos", icon: ClipboardList, label: "Gestión de Pedidos" },
-              { id: "Cocina", icon: ChefHat, label: "Cocina" },
               { id: "Notas de Venta", icon: ReceiptText, label: "Notas de Venta" },
               { id: "Facturación", icon: FileText, label: "Facturación" },
               { id: "Productos", icon: PackageOpen, label: "Menú de Ventas" },
               { id: "Inventario", icon: Package, label: "Bodega" },
+              { id: "Cierre de Caja", icon: Calculator, label: "Cierre de Caja" },
               { id: "Proveedores", icon: Truck, label: "Proveedores" },
               { id: "Clientes", icon: Users, label: "Clientes" },
               { id: "Egresos", icon: Wallet, label: "Egresos" },
@@ -1808,11 +1933,17 @@ export default function App() {
                             className="bg-white border border-slate-100 rounded-[1.5rem] p-5 flex flex-col justify-between shadow-sm hover:shadow-md transition-shadow h-[220px]"
                           >
                             <div className="flex gap-4">
-                              <img
-                                src={item.image}
-                                alt={item.name}
-                                className="w-24 h-24 rounded-2xl object-cover shadow-sm"
-                              />
+                              {hasImage(item.image) ? (
+                                <img
+                                  src={item.image}
+                                  alt={item.name}
+                                  className="w-24 h-24 rounded-2xl object-cover shadow-sm"
+                                />
+                              ) : (
+                                <div className={`w-24 h-24 rounded-2xl bg-gradient-to-br ${getProductColor(item.name)} flex items-center justify-center font-extrabold text-2xl shadow-sm shrink-0 select-none`}>
+                                  {getInitials(item.name)}
+                                </div>
+                              )}
                               <div className="flex-1">
                                 <h3 className="font-bold text-sm text-slate-800 leading-tight mb-2 line-clamp-2">
                                   {item.name}
@@ -1844,7 +1975,9 @@ export default function App() {
                                 </span>
                                 <button
                                   onClick={() => updateQuantity(item, 1)}
-                                  className="w-8 h-8 rounded-full bg-blue-600 flex items-center justify-center text-white shadow-md shadow-blue-200 hover:bg-blue-700 transition-colors"
+                                  disabled={qty >= item.available}
+                                  className={`w-8 h-8 rounded-full flex items-center justify-center text-white shadow-md transition-colors
+                                  ${qty >= item.available ? "bg-slate-200 text-slate-400 cursor-not-allowed shadow-none" : "bg-blue-600 shadow-blue-200 hover:bg-blue-700"}`}
                                 >
                                   <Plus className="w-4 h-4" />
                                 </button>
@@ -2078,10 +2211,7 @@ export default function App() {
                       </thead>
                       <tbody className="divide-y divide-slate-100">
                         {["Materia Prima", "Bebidas"].includes(inventoryTab)
-                          ? (inventoryTab === "Materia Prima"
-                              ? inventoryItems
-                              : inventoryBebidas
-                            ).map((item) => {
+                          ? (paginatedInventoryItems as InventoryItem[]).map((item) => {
                               const stockRatio =
                                 item.quantity / item.minQuantity;
                               let statusColor =
@@ -2149,10 +2279,7 @@ export default function App() {
                                 </tr>
                               );
                             })
-                          : (inventoryTab === "Comidas"
-                              ? inventoryComidas
-                              : inventoryCombos
-                            ).map((item) => {
+                          : (paginatedInventoryItems as (ComidaItem | ComboItem)[]).map((item) => {
                               const maxProduction =
                                 inventoryTab === "Comidas"
                                   ? calculateMaxComidas(item as ComidaItem)
@@ -2222,6 +2349,11 @@ export default function App() {
                       </tbody>
                     </table>
                   </div>
+                  <Pagination
+                    currentPage={inventoryPage}
+                    totalPages={totalInventoryPages}
+                    onPageChange={setInventoryPage}
+                  />
                 </div>
               </div>
             ) : activeTab === "Proveedores" ? (
@@ -2325,6 +2457,16 @@ export default function App() {
                   ))}
                 </div>
               </div>
+            ) : activeTab === "Cierre de Caja" ? (
+              <CashDashboard
+                salesNotes={salesNotes}
+                expenses={expenses}
+                activeSession={activeSession}
+                cashClosings={cashClosings}
+                onOpenSession={handleOpenSession}
+                onCloseSession={handleCloseSession}
+                onPrintReport={handlePrintReport}
+              />
             ) : activeTab === "Clientes" ? (
               <CustomersDashboard
                 customers={customers}
@@ -2420,18 +2562,12 @@ export default function App() {
                     ))}
                   </div>
                   {orderType === "mesa" && (
-                    <CustomSelect
+                    <input
+                      type="text"
+                      placeholder="Número o Nombre de la Mesa (ej: Mesa 1, Barra, etc.)"
                       value={tableNumber}
-                      onChange={(value) => setTableNumber(value)}
-                      options={[
-                        { label: "Mesa 1", value: "1" },
-                        { label: "Mesa 2", value: "2" },
-                        { label: "Mesa 3", value: "3" },
-                        { label: "Mesa 4", value: "4" },
-                        { label: "Barra", value: "Barra" },
-                      ]}
-                      placeholder="Seleccionar Mesa"
-                      className="w-full bg-white border border-slate-200 rounded-2xl px-5 py-3 text-sm font-medium text-slate-500 hover:bg-slate-50"
+                      onChange={(e) => setTableNumber(e.target.value)}
+                      className="w-full bg-white border border-slate-200 rounded-2xl px-5 py-3 text-sm font-bold text-slate-800 focus:ring-2 focus:ring-blue-500 outline-none transition-shadow placeholder:text-slate-400 placeholder:font-medium"
                     />
                   )}
                   {orderType === "delivery" && (
@@ -2468,60 +2604,73 @@ export default function App() {
                 </h3>
                 <div className="flex-1 space-y-5 pr-2 mb-6 shrink-0 min-h-[150px]">
                   <AnimatePresence initial={false}>
-                    {cartItems.map((item) => (
-                      <motion.div
-                        key={item.menuItem.id}
-                        layout
-                        initial={{ opacity: 0, x: 20 }}
-                        animate={{ opacity: 1, x: 0 }}
-                        exit={{ opacity: 0, x: -20 }}
-                        className="flex gap-4"
-                      >
-                        <img
-                          src={item.menuItem.image}
-                          alt={item.menuItem.name}
-                          className="w-16 h-16 rounded-2xl object-cover shadow-sm"
-                        />
-                        <div className="flex-1 flex flex-col justify-between py-0.5">
-                          <div className="flex justify-between items-start gap-2">
-                            <h4 className="font-bold text-sm text-slate-800 leading-tight line-clamp-2">
-                              {item.menuItem.name}
-                            </h4>
-                            <span className="font-bold text-sm text-slate-800">
-                              {formatCurrency(
-                                item.menuItem.price * item.quantity,
-                              )}
-                            </span>
-                          </div>
-                                                    <div className="flex flex-col gap-2 mt-2">
-                            <div className="flex items-center gap-4">
-                              <button
-                                onClick={() => updateQuantity(item.menuItem, -1)}
-                                className="w-6 h-6 rounded-full bg-slate-100 flex items-center justify-center text-slate-600 hover:bg-slate-200 transition-colors"
-                              >
-                                <Minus className="w-3 h-3" />
-                              </button>
-                              <span className="font-bold text-sm w-2 text-center">
-                                {item.quantity}
-                              </span>
-                              <button
-                                onClick={() => updateQuantity(item.menuItem, 1)}
-                                className="w-6 h-6 rounded-full bg-blue-600 flex items-center justify-center text-white shadow-sm hover:bg-blue-700 transition-colors"
-                              >
-                                <Plus className="w-3 h-3" />
-                              </button>
-                            </div>
-                            <input 
-                              type="text" 
-                              placeholder="Observaciones (ej. sin hielo)" 
-                              className="text-xs w-full bg-slate-50 border border-slate-200 rounded px-2 py-1 outline-none focus:ring-1 focus:ring-blue-500"
-                              value={item.observation || ""}
-                              onChange={(e) => updateObservation(item.menuItem, e.target.value)}
+                    {cartItems.map((item) => {
+                      const dynamicItem = menuItems.find((m) => m.id === item.menuItem.id);
+                      const availableStock = dynamicItem ? dynamicItem.available : 0;
+                      const isMaxStockReached = item.quantity >= availableStock;
+                      return (
+                        <motion.div
+                          key={item.menuItem.id}
+                          layout
+                          initial={{ opacity: 0, x: 20 }}
+                          animate={{ opacity: 1, x: 0 }}
+                          exit={{ opacity: 0, x: -20 }}
+                          className="flex gap-4"
+                        >
+                          {hasImage(item.menuItem.image) ? (
+                            <img
+                              src={item.menuItem.image}
+                              alt={item.menuItem.name}
+                              className="w-16 h-16 rounded-2xl object-cover shadow-sm"
                             />
+                          ) : (
+                            <div className={`w-16 h-16 rounded-2xl bg-gradient-to-br ${getProductColor(item.menuItem.name)} flex items-center justify-center font-extrabold text-sm shadow-sm shrink-0 select-none`}>
+                              {getInitials(item.menuItem.name)}
+                            </div>
+                          )}
+                          <div className="flex-1 flex flex-col justify-between py-0.5">
+                            <div className="flex justify-between items-start gap-2">
+                              <h4 className="font-bold text-sm text-slate-800 leading-tight line-clamp-2">
+                                {item.menuItem.name}
+                              </h4>
+                              <span className="font-bold text-sm text-slate-800">
+                                {formatCurrency(
+                                  item.menuItem.price * item.quantity,
+                                )}
+                              </span>
+                            </div>
+                            <div className="flex flex-col gap-2 mt-2">
+                              <div className="flex items-center gap-4">
+                                <button
+                                  onClick={() => updateQuantity(item.menuItem, -1)}
+                                  className="w-6 h-6 rounded-full bg-slate-100 flex items-center justify-center text-slate-600 hover:bg-slate-200 transition-colors"
+                                >
+                                  <Minus className="w-3 h-3" />
+                                </button>
+                                <span className="font-bold text-sm w-2 text-center">
+                                  {item.quantity}
+                                </span>
+                                <button
+                                  onClick={() => updateQuantity(item.menuItem, 1)}
+                                  disabled={isMaxStockReached}
+                                  className={`w-6 h-6 rounded-full flex items-center justify-center text-white shadow-sm transition-colors
+                                  ${isMaxStockReached ? "bg-slate-200 text-slate-400 cursor-not-allowed shadow-none" : "bg-blue-600 hover:bg-blue-700"}`}
+                                >
+                                  <Plus className="w-3 h-3" />
+                                </button>
+                              </div>
+                              <input 
+                                type="text" 
+                                placeholder="Observaciones (ej. sin hielo)" 
+                                className="text-xs w-full bg-slate-50 border border-slate-200 rounded px-2 py-1 outline-none focus:ring-1 focus:ring-blue-500"
+                                value={item.observation || ""}
+                                onChange={(e) => updateObservation(item.menuItem, e.target.value)}
+                              />
+                            </div>
                           </div>
-                        </div>
-                      </motion.div>
-                    ))}
+                        </motion.div>
+                      );
+                    })}
                   </AnimatePresence>
 
                   {cartItems.length === 0 && (
@@ -3879,25 +4028,33 @@ export default function App() {
                 </div>
 
                 <div className="space-y-2 mb-8">
+                  <div className="flex justify-between text-sm">
+                    <span className="text-slate-500 font-medium">
+                      Subtotal
+                    </span>
+                    <span className="font-medium text-slate-700">
+                      {formatCurrency(previewOrder.subtotal)}
+                    </span>
+                  </div>
+                  {previewOrder.discount && previewOrder.discount > 0 ? (
+                    <div className="flex justify-between text-sm">
+                      <span className="text-slate-500 font-medium">
+                        Descuento
+                      </span>
+                      <span className="font-medium text-slate-700">
+                        -{formatCurrency(previewOrder.discount)}
+                      </span>
+                    </div>
+                  ) : null}
                   {previewOrder.documentType === "factura" && (
-                    <>
-                      <div className="flex justify-between text-sm">
-                        <span className="text-slate-500 font-medium">
-                          Subtotal
-                        </span>
-                        <span className="font-medium text-slate-700">
-                          {formatCurrency(previewOrder.subtotal)}
-                        </span>
-                      </div>
-                      <div className="flex justify-between text-sm">
-                        <span className="text-slate-500 font-medium">
-                          IVA (15%)
-                        </span>
-                        <span className="font-medium text-slate-700">
-                          {formatCurrency(previewOrder.tax)}
-                        </span>
-                      </div>
-                    </>
+                    <div className="flex justify-between text-sm">
+                      <span className="text-slate-500 font-medium">
+                        IVA (15%)
+                      </span>
+                      <span className="font-medium text-slate-700">
+                        {formatCurrency(previewOrder.tax)}
+                      </span>
+                    </div>
                   )}
                   <div className="flex justify-between items-end pt-2">
                     <span className="font-bold text-slate-800">TOTAL</span>
@@ -4106,6 +4263,139 @@ export default function App() {
                 >
                   Aceptar
                 </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Cierre de Caja (Z-Report) Preview Modal */}
+      <AnimatePresence>
+        {previewClosingReport && (
+          <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 10 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 10 }}
+              className="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden flex flex-col relative"
+            >
+              <div className="p-6">
+                <button
+                  onClick={() => setPreviewClosingReport(null)}
+                  className="absolute top-4 right-4 w-8 h-8 flex items-center justify-center rounded-full bg-slate-100 text-slate-500 hover:bg-slate-200 transition-colors"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+                <div id="cierre-print-area">
+                  <div className="text-center mb-6">
+                    <h3 className="font-bold text-lg text-slate-800">
+                      {previewClosingReport.isClosing ? "REPORTE DE CIERRE" : "REPORTE PARCIAL"}
+                    </h3>
+                    <p className="text-slate-500 text-xs mt-1">
+                      {previewClosingReport.isClosing ? "Cierre definitivo de caja" : "Corte parcial de caja"}
+                    </p>
+                  </div>
+
+                  <div className="space-y-3 text-xs text-slate-600 border-b border-dashed border-slate-200 pb-4 mb-4">
+                    <div className="flex justify-between">
+                      <span className="font-bold">ID Reporte:</span>
+                      <span className="font-medium text-slate-800 text-right">{previewClosingReport.id || "PARCIAL"}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="font-bold">Apertura:</span>
+                      <span className="font-medium text-slate-800 text-right">{new Date(previewClosingReport.openTime).toLocaleString("es-PE")}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="font-bold">Cierre:</span>
+                      <span className="font-medium text-slate-800 text-right">{new Date(previewClosingReport.closeTime).toLocaleString("es-PE")}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="font-bold">Cajero:</span>
+                      <span className="font-medium text-slate-800 text-right">{previewClosingReport.openedBy}</span>
+                    </div>
+                  </div>
+
+                  <div className="space-y-2 text-xs text-slate-600 border-b border-dashed border-slate-200 pb-4 mb-4">
+                    <div className="flex justify-between">
+                      <span>Fondo Inicial (+)</span>
+                      <span className="font-medium text-slate-800">{formatCurrency(previewClosingReport.openingBalance)}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span>Ventas Efectivo (+)</span>
+                      <span className="font-medium text-slate-800">{formatCurrency(previewClosingReport.cashSales)}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span>Egresos Efectivo (-)</span>
+                      <span className="font-medium text-slate-800">{formatCurrency(previewClosingReport.expenses)}</span>
+                    </div>
+                    <div className="flex justify-between font-bold text-slate-800 bg-slate-50 p-1.5 rounded">
+                      <span>Efectivo Esperado</span>
+                      <span>{formatCurrency(previewClosingReport.expectedCash)}</span>
+                    </div>
+                  </div>
+
+                  <div className="space-y-2 text-xs text-slate-600 border-b border-dashed border-slate-200 pb-4 mb-4">
+                    <div className="flex justify-between">
+                      <span>Ventas Transferencia</span>
+                      <span className="font-medium text-slate-800">{formatCurrency(previewClosingReport.transferSales)}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span>Ventas Tarjeta</span>
+                      <span className="font-medium text-slate-800">{formatCurrency(previewClosingReport.cardSales)}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span>Ventas Crédito</span>
+                      <span className="font-medium text-slate-800">{formatCurrency(previewClosingReport.creditSales)}</span>
+                    </div>
+                  </div>
+
+                  {previewClosingReport.isClosing && (
+                    <div className="space-y-2 text-xs text-slate-600 pb-2">
+                      <div className="flex justify-between">
+                        <span>Efectivo Real</span>
+                        <span className="font-medium text-slate-800">{formatCurrency(previewClosingReport.actualCash)}</span>
+                      </div>
+                      <div className="flex justify-between font-bold text-slate-800">
+                        <span>Diferencia Efectivo</span>
+                        <span className={previewClosingReport.differenceCash >= 0 ? "text-emerald-600" : "text-rose-600"}>
+                          {previewClosingReport.differenceCash >= 0 ? "+" : ""}{formatCurrency(previewClosingReport.differenceCash)}
+                        </span>
+                      </div>
+                      <div className="flex justify-between mt-2 pt-2 border-t border-slate-100">
+                        <span>Transferencias Reales</span>
+                        <span className="font-medium text-slate-800">{formatCurrency(previewClosingReport.actualTransfers)}</span>
+                      </div>
+                      <div className="flex justify-between font-bold text-slate-800">
+                        <span>Diferencia Transf.</span>
+                        <span className={previewClosingReport.differenceTransfers >= 0 ? "text-emerald-600" : "text-rose-600"}>
+                          {previewClosingReport.differenceTransfers >= 0 ? "+" : ""}{formatCurrency(previewClosingReport.differenceTransfers)}
+                        </span>
+                      </div>
+                    </div>
+                  )}
+
+                  {previewClosingReport.notes && (
+                    <div className="text-[10px] text-slate-500 mt-4 bg-slate-50 p-2 rounded">
+                      <span className="font-bold block">Observaciones:</span>
+                      {previewClosingReport.notes}
+                    </div>
+                  )}
+                </div>
+
+                <div className="mt-6 flex gap-3">
+                  <button
+                    onClick={() => setPreviewClosingReport(null)}
+                    className="flex-1 py-3 bg-slate-100 text-slate-600 rounded-xl font-bold hover:bg-slate-200 transition-colors text-sm"
+                  >
+                    Cerrar
+                  </button>
+                  <button
+                    onClick={() => window.print()}
+                    className="flex-1 py-3 bg-blue-600 text-white rounded-xl font-bold hover:bg-blue-700 shadow-lg shadow-blue-200 transition-all text-sm flex items-center justify-center gap-1.5"
+                  >
+                    <Printer className="w-4 h-4" /> Imprimir
+                  </button>
+                </div>
               </div>
             </motion.div>
           </div>

@@ -1,10 +1,11 @@
-import React, { useState } from "react";
+import React, { useState, useMemo, useEffect } from "react";
 import { Order, OrderStatus } from "../types";
 import { 
   ClipboardList, Search, Filter, Edit, 
   Trash2, ChefHat, CheckCircle, Receipt, Play
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
+import Pagination from "./Pagination";
 
 interface OrdersManagerProps {
   salesNotes: Order[];
@@ -45,6 +46,18 @@ export default function OrdersManager({
 
     return true;
   }).sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 9;
+
+  const totalPages = Math.ceil(filteredOrders.length / itemsPerPage);
+  const paginatedOrders = useMemo(() => {
+    return filteredOrders.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
+  }, [filteredOrders, currentPage]);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [filterStatus, searchQuery]);
 
   const getStatusBadge = (status: OrderStatus) => {
     switch(status) {
@@ -114,14 +127,14 @@ export default function OrdersManager({
 
       <div className="flex-1 overflow-y-auto">
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-          {filteredOrders.length === 0 ? (
+          {paginatedOrders.length === 0 ? (
             <div className="col-span-full text-center py-12 bg-slate-50 rounded-2xl border border-slate-100">
               <ClipboardList className="w-12 h-12 text-slate-300 mx-auto mb-3" />
               <h3 className="font-bold text-slate-500 mb-1">Sin Pedidos</h3>
               <p className="text-slate-400 text-sm">No se encontraron pedidos que coincidan con los filtros.</p>
             </div>
           ) : (
-            filteredOrders.map((order) => {
+            paginatedOrders.map((order) => {
               const isClosed = order.status === "paid" || order.status === "cobrado" || order.status === "anulada";
               return (
                 <div key={order.id} className={`bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden flex flex-col transition-all hover:shadow-md ${isClosed ? "opacity-70" : ""}`}>
@@ -237,6 +250,13 @@ export default function OrdersManager({
               );
             })
           )}
+        </div>
+        <div className="mt-4">
+          <Pagination
+            currentPage={currentPage}
+            totalPages={totalPages}
+            onPageChange={setCurrentPage}
+          />
         </div>
       </div>
 

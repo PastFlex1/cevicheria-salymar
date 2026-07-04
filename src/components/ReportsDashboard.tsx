@@ -85,26 +85,23 @@ export default function ReportsDashboard({
     let filtered = salesNotes;
 
     if (reportStartDate) {
-      const startObj = new Date(reportStartDate);
       const [year, month, day] = reportStartDate.split("-");
-      startObj.setFullYear(parseInt(year), parseInt(month) - 1, parseInt(day));
-      startObj.setHours(0, 0, 0, 0);
+      const startObj = new Date(parseInt(year), parseInt(month) - 1, parseInt(day), 0, 0, 0, 0);
       filtered = filtered.filter((o) => new Date(o.date) >= startObj);
     }
     if (reportEndDate) {
-      const endObj = new Date(reportEndDate);
       const [year, month, day] = reportEndDate.split("-");
-      endObj.setFullYear(parseInt(year), parseInt(month) - 1, parseInt(day));
-      endObj.setHours(23, 59, 59, 999);
+      const endObj = new Date(parseInt(year), parseInt(month) - 1, parseInt(day), 23, 59, 59, 999);
       filtered = filtered.filter((o) => new Date(o.date) <= endObj);
     }
     if (reportCustomer.trim()) {
+      const search = reportCustomer.toLowerCase();
       filtered = filtered.filter(
         (o) =>
-          o.customerName
-            ?.toLowerCase()
-            .includes(reportCustomer.toLowerCase()) ||
-          o.businessName?.toLowerCase().includes(reportCustomer.toLowerCase()),
+          o.customerName?.toLowerCase().includes(search) ||
+          o.businessName?.toLowerCase().includes(search) ||
+          o.ruc?.toLowerCase().includes(search) ||
+          o.clientId?.toLowerCase().includes(search)
       );
     }
     if (reportInvoiceNumber.trim()) {
@@ -113,7 +110,11 @@ export default function ReportsDashboard({
       );
     }
     if (reportStatus !== "Todos") {
-      filtered = filtered.filter((o) => o.status === reportStatus);
+      if (reportStatus === "paid") {
+        filtered = filtered.filter((o) => o.status === "paid" || o.status === "cobrado");
+      } else {
+        filtered = filtered.filter((o) => o.status === reportStatus);
+      }
     }
     if (reportPaymentMethod !== "Todos") {
       filtered = filtered.filter(
@@ -139,17 +140,13 @@ export default function ReportsDashboard({
   const filteredExpenses = useMemo(() => {
     let filtered = expenses;
     if (reportStartDate) {
-      const startObj = new Date(reportStartDate);
       const [year, month, day] = reportStartDate.split("-");
-      startObj.setFullYear(parseInt(year), parseInt(month) - 1, parseInt(day));
-      startObj.setHours(0, 0, 0, 0);
+      const startObj = new Date(parseInt(year), parseInt(month) - 1, parseInt(day), 0, 0, 0, 0);
       filtered = filtered.filter((e) => new Date(e.date) >= startObj);
     }
     if (reportEndDate) {
-      const endObj = new Date(reportEndDate);
       const [year, month, day] = reportEndDate.split("-");
-      endObj.setFullYear(parseInt(year), parseInt(month) - 1, parseInt(day));
-      endObj.setHours(23, 59, 59, 999);
+      const endObj = new Date(parseInt(year), parseInt(month) - 1, parseInt(day), 23, 59, 59, 999);
       filtered = filtered.filter((e) => new Date(e.date) <= endObj);
     }
     return filtered;
@@ -652,7 +649,8 @@ export default function ReportsDashboard({
               className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 outline-none"
             >
               <option value="Todos">Todos</option>
-              <option value="paid">Pagada / Completada</option>
+              <option value="paid">Cobrada / Pagada</option>
+              <option value="por_cobrar">Por Cobrar</option>
               <option value="anulada">Anulada</option>
             </select>
           </div>
@@ -670,6 +668,7 @@ export default function ReportsDashboard({
               <option value="Transferencia">Transferencia</option>
               <option value="Tarjeta">Tarjeta</option>
               <option value="Crédito">Crédito</option>
+              <option value="Mixto">Mixto</option>
               <option value="Otro">Otro</option>
             </select>
           </div>
