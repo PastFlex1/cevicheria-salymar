@@ -1,11 +1,13 @@
-import React, { useState, useMemo, useEffect } from "react";
+import React, { useState, useMemo, useEffect, useRef } from "react";
 import { Order, OrderItem, MenuItem, OrderStatus, Customer } from "../types";
-import { Search, Plus, Trash2, Printer, Download, Receipt, X, ArrowLeft, DollarSign, CreditCard, Wallet, User, CheckCircle, SearchCode, AlertCircle, XCircle } from "lucide-react";
+import { Search, Plus, Trash2, Printer, Download, Receipt, X, ArrowLeft, DollarSign, CreditCard, Wallet, User, CheckCircle, SearchCode, AlertCircle, XCircle, FileCode } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import * as ExcelJS from "exceljs";
 import { saveAs } from "file-saver";
 import { validarDocumento, detectarTipoDocumento, obtenerNombreTipoDocumento, limpiarDocumento } from "../lib/validators";
+import { generateInvoiceXML, generateAccessKey, SRIInvoiceData } from "../lib/sri";
 import Pagination from "./Pagination";
+import { createPDFDoc } from "../lib/pdfGenerator";
 
 export interface BillingDashboardProps {
   salesNotes: Order[];
@@ -53,7 +55,7 @@ export default function BillingDashboard({
     });
   };
   
-  // Create Form State
+  // Form State
   const [items, setItems] = useState<OrderItem[]>(initialOrderToBill ? initialOrderToBill.items : []);
   const [searchProduct, setSearchProduct] = useState("");
   const [showCustomerSearch, setShowCustomerSearch] = useState(false);
@@ -277,9 +279,87 @@ export default function BillingDashboard({
     currentPage * itemsPerPage
   );
 
-  // Download PDF simulation
+  // Download PDF
   const downloadPdf = (inv: Order) => {
-    showAlert(`Descargando PDF de ${inv.id}...`, "Descarga Iniciada", "info");
+    showAlert(`Generando PDF de ${inv.id}...`, "Generando RIDE", "info");
+    const sriData: SRIInvoiceData = {
+      rucEmisor: "1714809025001",
+      razonSocialEmisor: "ACHI LOPEZ JOSUE ANDRES",
+      nombreComercialEmisor: "CEVICHERIA SALYMAR",
+      dirMatriz: "PICHINCHA / QUITO / CHILIBULO / LA MAGDALENA ALTA S10 PURUHA OE6-203 Y OE6A HUALCOPO",
+      estab: inv.id.includes("-") ? inv.id.split("-")[0] : "001",
+      ptoEmi: inv.id.includes("-") ? inv.id.split("-")[1] : "001",
+      secuencial: inv.id.includes("-") ? inv.id.split("-")[2] : inv.id.replace("#", "").padStart(9, "0"),
+      fechaEmision: new Date(inv.date).toLocaleDateString("es-EC", {
+        day: "2-digit",
+        month: "2-digit",
+        year: "numeric"
+      }),
+      cliente: {
+        razonSocial: inv.businessName || inv.customerName || "CONSUMIDOR FINAL",
+        identificacion: inv.ruc || inv.clientId || "9999999999999",
+        direccion: inv.clientAddress || undefined,
+        email: inv.clientEmail || undefined
+      },
+      items: inv.items.map(item => ({
+        codigo: item.menuItem.id,
+        descripcion: item.menuItem.name,
+        cantidad: item.quantity,
+        precioUnitario: item.menuItem.price,
+        descuento: 0
+      })),
+      formaPago: inv.paymentMethod === "Efectivo" ? "01" : "20",
+    };
+    try {
+      const doc = createPDFDoc(inv, sriData);
+      doc.save(`Factura_${inv.id}.pdf`);
+      showAlert(`RIDE descargado exitosamente.`, "Éxito", "success");
+    } catch (e) {
+      console.error(e);
+      showAlert(`Error al generar el PDF.`, "Error", "error");
+    }
+  };
+
+  const downloadXML = (inv: Order) => {
+    try {
+      const sriData: SRIInvoiceData = {
+        rucEmisor: "1714809025001",
+        razonSocialEmisor: "ACHI LOPEZ JOSUE ANDRES",
+        nombreComercialEmisor: "CEVICHERIA SALYMAR",
+        dirMatriz: "PICHINCHA / QUITO / CHILIBULO / LA MAGDALENA ALTA S10 PURUHA OE6-203 Y OE6A HUALCOPO",
+        estab: inv.id.includes("-") ? inv.id.split("-")[0] : "001",
+        ptoEmi: inv.id.includes("-") ? inv.id.split("-")[1] : "001",
+        secuencial: inv.id.includes("-") ? inv.id.split("-")[2] : inv.id.replace("#", "").padStart(9, "0"),
+        fechaEmision: new Date(inv.date).toLocaleDateString("es-EC", {
+          day: "2-digit",
+          month: "2-digit",
+          year: "numeric"
+        }),
+        cliente: {
+          razonSocial: inv.businessName || inv.customerName || "CONSUMIDOR FINAL",
+          identificacion: inv.ruc || inv.clientId || "9999999999999",
+          direccion: inv.clientAddress || undefined,
+          email: inv.clientEmail || undefined
+        },
+        items: inv.items.map(item => ({
+          codigo: item.menuItem.id,
+          descripcion: item.menuItem.name,
+          cantidad: item.quantity,
+          precioUnitario: item.menuItem.price,
+          descuento: 0
+        })),
+        formaPago: inv.paymentMethod === "Efectivo" ? "01" : "20",
+      };
+      
+      const xml = generateInvoiceXML(sriData);
+      const claveAcceso = generateAccessKey({ ...sriData, fechaEmision: sriData.fechaEmision }, "01");
+      const blob = new Blob([xml], { type: "application/xml;charset=utf-8" });
+      saveAs(blob, `factura_${claveAcceso}.xml`);
+      showAlert(`XML generado con clave de acceso: ${claveAcceso}`, "XML Descargado", "success");
+    } catch (error) {
+      console.error(error);
+      showAlert("Error al generar el XML.", "Error", "error");
+    }
   };
 
   const printInvoice = (inv: Order) => {
@@ -407,6 +487,9 @@ export default function BillingDashboard({
                         <button onClick={() => printInvoice(inv)} className="p-1.5 bg-slate-100 text-slate-600 hover:bg-blue-100 hover:text-blue-600 rounded-md transition-colors" title="Imprimir">
                           <Printer className="w-4 h-4" />
                         </button>
+                        <button onClick={() => downloadXML(inv)} className="p-1.5 bg-slate-100 text-slate-600 hover:bg-emerald-100 hover:text-emerald-600 rounded-md transition-colors" title="Descargar XML (SRI)">
+                          <FileCode className="w-4 h-4" />
+                        </button>
                         <button onClick={() => downloadPdf(inv)} className="p-1.5 bg-slate-100 text-slate-600 hover:bg-indigo-100 hover:text-indigo-600 rounded-md transition-colors" title="Descargar PDF">
                           <Download className="w-4 h-4" />
                         </button>
@@ -435,7 +518,7 @@ export default function BillingDashboard({
       )}
 
       {view === "create" && (
-        <div className="flex-1 flex flex-col md:flex-row gap-6 px-6 overflow-hidden">
+        <div className="flex-1 flex flex-col xl:flex-row gap-6 px-6 overflow-hidden">
           {/* Left Panel: Invoice Details & Products */}
           <div className="flex-1 flex flex-col gap-6 overflow-y-auto pr-2">
             
@@ -596,7 +679,7 @@ export default function BillingDashboard({
                         setClientForm({...clientForm, documentId: limpio});
                       }
                     }}
-                    placeholder="9999999999999"
+                    placeholder="Ej: 0912345678"
                     className={`w-full bg-slate-50 border rounded-xl px-4 py-2 text-sm font-medium focus:ring-2 focus:ring-blue-500 outline-none ${clientForm.documentId ? (validacionDoc.valido ? "border-green-400" : "border-red-400") : "border-slate-200"}`}
                   />
                   {clientForm.documentId && clientForm.documentId !== "9999999999999" && (
@@ -613,7 +696,7 @@ export default function BillingDashboard({
                     type="text"
                     value={clientForm.businessName}
                     onChange={(e) => setClientForm({...clientForm, businessName: e.target.value, clientId: ""})}
-                    placeholder="Consumidor Final"
+                    placeholder="Ej: Juan Pérez"
                     className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2 text-sm font-medium focus:ring-2 focus:ring-blue-500 outline-none"
                   />
                 </div>
@@ -731,7 +814,7 @@ export default function BillingDashboard({
           </div>
 
           {/* Right Panel: Summary & Payment */}
-          <div className="w-full md:w-96 flex flex-col gap-6 shrink-0 overflow-y-auto">
+          <div className="w-full xl:w-96 flex flex-col gap-6 shrink-0 overflow-y-auto">
             {/* Totals Box */}
             <div className="bg-slate-800 rounded-3xl p-6 text-white shadow-xl relative overflow-hidden">
               <div className="absolute -right-8 -top-8 w-32 h-32 bg-white opacity-5 rounded-full blur-2xl"></div>

@@ -36,9 +36,9 @@ const PROVINCIAS: Record<string, string> = {
   "24": "Santa Elena",
 };
 
-export function limpiarDocumento(documento: string): string {
-  if (!documento) return "";
-  return documento.replace(/[^a-zA-Z0-9-]/g, "").trim().toUpperCase();
+export function limpiarDocumento(documento: any): string {
+  if (documento === null || documento === undefined) return "";
+  return String(documento).replace(/[^a-zA-Z0-9-]/g, "").trim().toUpperCase();
 }
 
 export function obtenerProvincia(codigo: string): string | undefined {

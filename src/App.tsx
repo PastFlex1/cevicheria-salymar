@@ -88,6 +88,9 @@ import ProductsDashboard from "./components/ProductsDashboard";
 import CustomersDashboard from "./components/CustomersDashboard";
 import Pagination from "./components/Pagination";
 import { getInitials, getProductColor, hasImage } from "./lib/utils";
+import { SalesReport } from "./components/SalesReport";
+import { generateInvoiceXML, downloadXML, SRIInvoiceData } from "./lib/sri";
+import { createPDFDoc } from "./lib/pdfGenerator";
 
 // Utility for currency formatting
 const formatCurrency = (value: number) => {
@@ -131,6 +134,24 @@ export default function App() {
   const [validationError, setValidationError] = useState<string | null>(null);
   const [showCheckoutCustomerSearch, setShowCheckoutCustomerSearch] = useState(false);
   const [checkoutCustomerSearchTerm, setCheckoutCustomerSearchTerm] = useState("");
+
+  const rideRef = useRef<HTMLDivElement>(null);
+  const [sriDataForPDF, setSriDataForPDF] = useState<SRIInvoiceData | null>(null);
+  const [orderForPDF, setOrderForPDF] = useState<Order | null>(null);
+
+  useEffect(() => {
+    if (orderForPDF && sriDataForPDF) {
+      try {
+        const doc = createPDFDoc(orderForPDF, sriDataForPDF);
+        doc.save(`Factura_${orderForPDF.id}.pdf`);
+      } catch (e) {
+        console.error("Error generating PDF:", e);
+      } finally {
+        setOrderForPDF(null);
+        setSriDataForPDF(null);
+      }
+    }
+  }, [orderForPDF, sriDataForPDF]);
 
   const [alertModal, setAlertModal] = useState<{
     isOpen: boolean;
@@ -334,7 +355,7 @@ export default function App() {
     for (const item of next) {
       const curItem = currentMap.get(item.id);
       if (!curItem || JSON.stringify(curItem) !== JSON.stringify(item)) {
-        await setDoc(doc(db, collectionName, item.id), item);
+        await setDoc(doc(db, collectionName, item.id), JSON.parse(JSON.stringify(item)));
       }
     }
 
@@ -779,8 +800,8 @@ export default function App() {
   const handleCheckout = () => {
     if (cartItems.length === 0) return;
     setCheckoutForm({
-      documentId: "9999999999999",
-      businessName: "Consumidor Final",
+      documentId: "",
+      businessName: "",
       email: "",
       phone: "",
       address: "",
@@ -902,8 +923,8 @@ export default function App() {
   const checkoutOrderLegacy = (order: Order) => {
     setCartItems(order.items);
     setCheckoutForm({
-      documentId: order.ruc || "9999999999999",
-      businessName: order.businessName || order.customerName || "Consumidor Final",
+      documentId: order.ruc || "",
+      businessName: order.businessName || order.customerName || "",
       email: "",
       phone: "",
       address: "",
@@ -1317,14 +1338,16 @@ export default function App() {
       );
     } else {
       const currentMaxId = salesNotes.reduce((max, note) => {
-        const numId = parseInt(note.id.replace(/\D/g, ""), 10);
+        const parts = note.id.split('-');
+        const lastPart = parts[parts.length - 1];
+        const numId = parseInt(lastPart.replace(/\D/g, ""), 10);
         return !isNaN(numId) && numId > max ? numId : max;
       }, 0);
       const nextIdNum = currentMaxId + 1;
-      const nextIdStr = nextIdNum.toString().padStart(6, "0");
+      const nextIdStr = nextIdNum.toString().padStart(9, "0");
 
       const newOrder: Order = {
-        id: `#${nextIdStr}`,
+        id: `001-001-${nextIdStr}`,
         items: [...cartItems],
         subtotal,
         tax,
@@ -1466,6 +1489,8 @@ export default function App() {
       }
     }
 
+    let processedOrder: Order | null = null;
+
     if (editingOrderId) {
       let updatedOrder: Order | null = null;
       setSalesNotes((prev) => 
@@ -1494,17 +1519,22 @@ export default function App() {
           return order;
         })
       );
-      if (updatedOrder) setPreviewOrder(updatedOrder);
+      if (updatedOrder) {
+          setPreviewOrder(updatedOrder);
+          processedOrder = updatedOrder;
+      }
     } else {
       const currentMaxId = salesNotes.reduce((max, note) => {
-        const numId = parseInt(note.id.replace(/\D/g, ""), 10);
+        const parts = note.id.split('-');
+        const lastPart = parts[parts.length - 1];
+        const numId = parseInt(lastPart.replace(/\D/g, ""), 10);
         return !isNaN(numId) && numId > max ? numId : max;
       }, 0);
       const nextIdNum = currentMaxId + 1;
-      const nextIdStr = nextIdNum.toString().padStart(6, "0");
+      const nextIdStr = nextIdNum.toString().padStart(9, "0");
 
       const newOrder: Order = {
-        id: `#${nextIdStr}`,
+        id: `001-001-${nextIdStr}`,
         items: [...cartItems],
         subtotal,
         tax,
@@ -1525,6 +1555,7 @@ export default function App() {
       
       setSalesNotes([newOrder, ...salesNotes]);
       setPreviewOrder(newOrder);
+      processedOrder = newOrder;
     }
     setCartItems([]);
     setCheckoutForm({
@@ -1543,6 +1574,47 @@ export default function App() {
     if (documentType === "factura") {
       setSuccessMessage("¡Factura autorizada exitosamente por el SRI!");
       setTimeout(() => setSuccessMessage(null), 4000);
+      
+      const order = processedOrder;
+      
+      // Reconstruir subtotal por si no está (solo lo logramos con cartItems o si hay un order)
+      const itemsToBill = cartItems.length > 0 ? cartItems : (order?.items || []);
+      
+      if (order) {
+          const sriData: SRIInvoiceData = {
+            rucEmisor: "1714809025001",
+            razonSocialEmisor: "ACHI LOPEZ JOSUE ANDRES",
+            nombreComercialEmisor: "CEVICHERIA SALYMAR",
+            dirMatriz: "S10 PURUHA OE6-203 Y OE6A HUALCOPO, QUITO",
+            estab: "001",
+            ptoEmi: "001",
+            secuencial: order.id.split('-').pop()?.replace(/\D/g, "") || "",
+            fechaEmision: new Date().toLocaleDateString("en-GB"), // "DD/MM/YYYY" format
+            cliente: {
+                razonSocial: checkoutForm.businessName || "CONSUMIDOR FINAL",
+                identificacion: checkoutForm.documentId || "9999999999999",
+                direccion: checkoutForm.address,
+                email: checkoutForm.email,
+            },
+            items: itemsToBill.map(item => ({
+                codigo: item.menuItem.id,
+                descripcion: item.menuItem.name,
+                cantidad: item.quantity,
+                precioUnitario: item.menuItem.price / 1.15,
+                descuento: 0
+            })),
+            formaPago: checkoutForm.paymentMethod === "Efectivo" ? "01" : "20"
+          };
+          
+          try {
+            const xml = generateInvoiceXML(sriData);
+            downloadXML(xml, `factura_${order.id.replace("#", "")}.xml`);
+            setOrderForPDF(order);
+            setSriDataForPDF(sriData);
+          } catch (e) {
+            console.error("Error generando XML SRI", e);
+          }
+      }
     }
   };
 
@@ -1812,9 +1884,10 @@ export default function App() {
       {/* Main App Container */}
       <div className="w-full max-w-[1500px] h-[90vh] min-h-[800px] bg-white rounded-[2.5rem] shadow-xl flex flex-col overflow-hidden">
         {/* Top Header */}
-        <header className="h-20 px-4 md:px-8 flex items-center justify-between border-b border-slate-100 shrink-0 gap-4">
+        {/* Top Header */}
+        <header className="min-h-[5rem] px-4 md:px-8 flex flex-wrap items-start justify-between border-b border-slate-100 shrink-0 gap-4 py-4">
           {/* Logo */}
-          <div className="flex items-center gap-3 shrink-0">
+          <div className="flex items-center gap-3 shrink-0 mt-1">
             <img
               src="/Salymar.png"
               alt="SalyMar Logo"
@@ -1826,7 +1899,7 @@ export default function App() {
           </div>
 
           {/* Center Navigation */}
-          <nav className="flex items-center gap-1 xl:gap-2 overflow-x-auto hide-scrollbar flex-1">
+          <nav className="flex items-start justify-end lg:justify-start flex-wrap gap-x-2 gap-y-2 flex-1 pl-0 lg:pl-4 mt-1">
             {[
               { id: "Dashboard", icon: LayoutGrid, label: "Nuevo Pedido" },
               { id: "Lista de Pedidos", icon: ClipboardList, label: "Gestión de Pedidos" },
@@ -1843,9 +1916,9 @@ export default function App() {
               <button
                 key={tab.id}
                 onClick={() => setActiveTab(tab.id)}
-                className={`flex items-center gap-1 md:gap-1.5 text-[10px] lg:text-[11px] xl:text-xs font-bold py-6 px-1 lg:px-1.5 border-b-2 transition-colors whitespace-nowrap ${activeTab === tab.id ? "text-blue-600 border-blue-600" : "text-slate-500 border-transparent hover:text-slate-800 hover:bg-slate-50"}`}
+                className={`flex items-center gap-1.5 text-[11px] xl:text-xs font-bold py-2.5 px-2 rounded-lg transition-colors whitespace-nowrap ${activeTab === tab.id ? "bg-blue-50 text-blue-700" : "text-slate-500 hover:text-slate-800 hover:bg-slate-50"}`}
               >
-                <tab.icon className="w-3.5 h-3.5 md:w-4 md:h-4" />
+                <tab.icon className="w-4 h-4" />
                 <span className="hidden sm:inline">{tab.label}</span>
               </button>
             ))}
@@ -2243,7 +2316,7 @@ export default function App() {
                                   </td>
                                   <td className="py-4 px-6 text-right">
                                     <span className="font-bold text-slate-800">
-                                      {item.quantity}
+                                      {Number(item.quantity.toFixed(2))}
                                     </span>
                                     <span className="text-slate-500 text-xs ml-1">
                                       {item.unit}
@@ -4401,6 +4474,7 @@ export default function App() {
           </div>
         )}
       </AnimatePresence>
+
     </div>
   );
 }

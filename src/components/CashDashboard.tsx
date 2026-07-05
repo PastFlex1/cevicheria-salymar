@@ -291,9 +291,9 @@ export default function CashDashboard({
             </div>
           ) : (
             /* Open Cash View */
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 px-6 h-full">
+            <div className="grid grid-cols-1 xl:grid-cols-3 gap-6 px-6 h-full">
               {/* Financial summary */}
-              <div className="lg:col-span-2 space-y-6">
+              <div className="xl:col-span-2 space-y-6">
                 <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm">
                   <div className="flex justify-between items-start mb-6">
                     <h3 className="font-bold text-slate-800 flex items-center gap-2">
