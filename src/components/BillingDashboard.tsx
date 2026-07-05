@@ -226,6 +226,11 @@ export default function BillingDashboard({
     }
 
     showAlert(documentType === "factura" ? "Factura generada con éxito." : "Nota de venta generada con éxito.", "Venta Completada", "success");
+    
+    if (printAfter && onPrint) {
+      onPrint(newInvoice);
+    }
+
     setView("list");
     setItems([]);
     setClientForm({ clientId: "", documentId: "", businessName: "", phone: "", email: "", address: "" });
@@ -946,12 +951,21 @@ export default function BillingDashboard({
                 </div>
               )}
 
-              <button
-                onClick={handleSaveInvoice}
-                className="w-full mt-6 bg-emerald-600 hover:bg-emerald-700 text-white font-black py-4 rounded-2xl text-lg shadow-sm shadow-emerald-200 transition-all active:scale-[0.98] flex items-center justify-center gap-2"
-              >
-                GENERAR FACTURA
-              </button>
+              <div className="flex flex-col gap-3 mt-6">
+                <button
+                  onClick={() => handleSaveInvoice(true)}
+                  className="w-full bg-slate-900 hover:bg-slate-800 text-white font-black py-4 rounded-2xl text-lg shadow-sm shadow-slate-200 transition-all active:scale-[0.98] flex items-center justify-center gap-2"
+                >
+                  <Printer className="w-5 h-5" />
+                  GENERAR E IMPRIMIR
+                </button>
+                <button
+                  onClick={() => handleSaveInvoice(false)}
+                  className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-black py-4 rounded-2xl text-lg shadow-sm shadow-emerald-200 transition-all active:scale-[0.98] flex items-center justify-center gap-2"
+                >
+                  SOLO GENERAR
+                </button>
+              </div>
             </div>
           </div>
         </div>
