@@ -88,7 +88,6 @@ import ProductsDashboard from "./components/ProductsDashboard";
 import CustomersDashboard from "./components/CustomersDashboard";
 import Pagination from "./components/Pagination";
 import { getInitials, getProductColor, hasImage } from "./lib/utils";
-import { SalesReport } from "./components/SalesReport";
 import { generateInvoiceXML, downloadXML, SRIInvoiceData } from "./lib/sri";
 import { createPDFDoc } from "./lib/pdfGenerator";
 

@@ -125,7 +125,7 @@ export default function BillingDashboard({
     setItems((prev) => prev.map((i) => i.menuItem.id === id ? { ...i, quantity: qty } : i));
   };
 
-  const handleSaveInvoice = () => {
+  const handleSaveInvoice = (printAfter: boolean = false) => {
     if (items.length === 0) {
       showAlert("No hay productos para facturar.", "Sin Productos", "warning");
       return;
