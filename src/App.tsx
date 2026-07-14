@@ -1,6 +1,5 @@
+import { api } from "./lib/api";
 import React, { useState, useEffect, useRef, useMemo } from "react";
-import { db } from "./firebase";
-import { collection, doc, setDoc, deleteDoc, onSnapshot } from "firebase/firestore";
 import * as ExcelJS from "exceljs";
 import { saveAs } from "file-saver";
 import { motion, AnimatePresence } from "motion/react";
@@ -244,63 +243,62 @@ export default function App() {
     return () => clearTimeout(timer);
   }, []);
 
-  // Sincronización en tiempo real con Firestore
+  // Sincronización con Backend Local
   useEffect(() => {
-    const unsubProviders = onSnapshot(collection(db, "providers"), (snapshot) => {
-      setProvidersState(snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as Provider)));
-    });
-    const unsubExpenses = onSnapshot(collection(db, "expenses"), (snapshot) => {
-      setExpensesState(snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as Expense)));
-    });
-    const unsubInvItems = onSnapshot(collection(db, "inventoryItems"), (snapshot) => {
-      setInventoryItemsState(snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as InventoryItem)));
-    });
-    const unsubInvComidas = onSnapshot(collection(db, "inventoryComidas"), (snapshot) => {
-      setInventoryComidasState(snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as ComidaItem)));
-    });
-    const unsubInvBebidas = onSnapshot(collection(db, "inventoryBebidas"), (snapshot) => {
-      setInventoryBebidasState(snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as InventoryItem)));
-    });
-    const unsubInvCombos = onSnapshot(collection(db, "inventoryCombos"), (snapshot) => {
-      setInventoryCombosState(snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as ComboItem)));
-    });
-    const unsubCategories = onSnapshot(collection(db, "menuCategories"), (snapshot) => {
-      setMenuCategoriesState(snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as Category)));
-    });
-    const unsubProducts = onSnapshot(collection(db, "menuProducts"), (snapshot) => {
-      setMenuProductsState(snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as MenuItem)));
-    });
-    const unsubSalesNotes = onSnapshot(collection(db, "salesNotes"), (snapshot) => {
-      setSalesNotesState(snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as Order)));
-    });
-    const unsubCustomers = onSnapshot(collection(db, "customers"), (snapshot) => {
-      setCustomersState(snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as Customer)));
-    });
-    const unsubCashSession = onSnapshot(doc(db, "cashSessions", "active"), (snapshot) => {
-      if (snapshot.exists()) {
-        setActiveSessionState(snapshot.data() as CashSession);
-      } else {
-        setActiveSessionState(null);
-      }
-    });
-    const unsubCashClosings = onSnapshot(collection(db, "cashClosings"), (snapshot) => {
-      setCashClosingsState(snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id })));
-    });
+    const loadData = async () => {
+      try {
+        const [
+          providersData,
+          expensesData,
+          invItemsData,
+          invComidasData,
+          invBebidasData,
+          invCombosData,
+          categoriesData,
+          productsData,
+          salesNotesData,
+          customersData,
+          cashSessionData,
+          cashClosingsData
+        ] = await Promise.all([
+          api.getCollection("providers"),
+          api.getCollection("expenses"),
+          api.getCollection("inventoryItems"),
+          api.getCollection("inventoryComidas"),
+          api.getCollection("inventoryBebidas"),
+          api.getCollection("inventoryCombos"),
+          api.getCollection("menuCategories"),
+          api.getCollection("menuProducts"),
+          api.getCollection("salesNotes"),
+          api.getCollection("customers"),
+          api.getDoc("cashSessions", "active").catch(() => null),
+          api.getCollection("cashClosings")
+        ]);
 
-    return () => {
-      unsubProviders();
-      unsubExpenses();
-      unsubInvItems();
-      unsubInvComidas();
-      unsubInvBebidas();
-      unsubInvCombos();
-      unsubCategories();
-      unsubProducts();
-      unsubSalesNotes();
-      unsubCustomers();
-      unsubCashSession();
-      unsubCashClosings();
+        setProvidersState(providersData);
+        setExpensesState(expensesData);
+        setInventoryItemsState(invItemsData);
+        setInventoryComidasState(invComidasData);
+        setInventoryBebidasState(invBebidasData);
+        setInventoryCombosState(invCombosData);
+        setMenuCategoriesState(categoriesData);
+        setMenuProductsState(productsData);
+        setSalesNotesState(salesNotesData);
+        setCustomersState(customersData);
+        if (cashSessionData && cashSessionData.id) {
+           setActiveSessionState(cashSessionData);
+        } else {
+           setActiveSessionState(null);
+        }
+        setCashClosingsState(cashClosingsData);
+      } catch (err) {
+        console.error("Error loading data from local API:", err);
+      }
     };
+    loadData();
+    // Polling cada 5 segundos
+    const interval = setInterval(loadData, 5000);
+    return () => clearInterval(interval);
   }, []);
 
   // Inicializar datos base en Firestore si están vacíos
@@ -318,7 +316,7 @@ export default function App() {
         { id: "CAT-8", name: "Combos", status: "activo" },
       ];
       defaultCategories.forEach(async (cat) => {
-        await setDoc(doc(db, "menuCategories", cat.id), cat);
+        await api.updateDoc("menuCategories", cat.id, cat);
       });
     }
   }, [menuCategories, isLoading, categoriesSeeded]);
@@ -338,7 +336,7 @@ export default function App() {
         totalPurchases: 0,
         numberOfPurchases: 0
       };
-      setDoc(doc(db, "customers", defaultCustomer.id), defaultCustomer);
+      api.updateDoc("customers", defaultCustomer.id, defaultCustomer);
     }
   }, [customers, isLoading, customerSeeded]);
 
@@ -354,13 +352,13 @@ export default function App() {
     for (const item of next) {
       const curItem = currentMap.get(item.id);
       if (!curItem || JSON.stringify(curItem) !== JSON.stringify(item)) {
-        await setDoc(doc(db, collectionName, item.id), JSON.parse(JSON.stringify(item)));
+        await api.updateDoc(collectionName, item.id, item);
       }
     }
 
     for (const item of current) {
       if (!nextMap.has(item.id)) {
-        await deleteDoc(doc(db, collectionName, item.id));
+        await api.deleteDoc(collectionName, item.id);
       }
     }
   };
@@ -814,7 +812,7 @@ export default function App() {
   const handleOpenSession = async (openingBalance: number) => {
     try {
       const sessionId = "SESS-" + Date.now();
-      await setDoc(doc(db, "cashSessions", "active"), {
+      await api.updateDoc("cashSessions", "active", {
         id: sessionId,
         status: "open",
         openedBy: "Administrador",
@@ -858,8 +856,8 @@ export default function App() {
         notes,
       };
 
-      await setDoc(doc(db, "cashClosings", closingId), closingReport);
-      await deleteDoc(doc(db, "cashSessions", "active"));
+      await api.updateDoc("cashClosings", closingId, closingReport);
+      await api.deleteDoc("cashSessions", "active");
 
       setPreviewClosingReport({
         ...closingReport,
