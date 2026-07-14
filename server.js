@@ -48,7 +48,7 @@ tables.forEach(table => {
         if (row.ingredients) row.ingredients = JSON.parse(row.ingredients);
         res.json(row);
       } else {
-        res.status(404).json({ error: 'Not found' });
+        res.json(null);
       }
     } catch (err) {
       res.status(500).json({ error: err.message });
