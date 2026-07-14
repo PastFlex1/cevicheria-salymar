@@ -135,5 +135,5 @@ app.get('*', (req, res) => {
 });
 
 app.listen(port, () => {
-  console.log(`Server is running on port ${port}`);
+  console.log(`🚀 Servidor listo! Abre este enlace en tu navegador: http://localhost:${port}`);
 });
