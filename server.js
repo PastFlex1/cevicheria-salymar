@@ -31,6 +31,7 @@ tables.forEach(table => {
         if (row.items) row.items = JSON.parse(row.items);
         if (row.payments) row.payments = JSON.parse(row.payments);
         if (row.ingredients) row.ingredients = JSON.parse(row.ingredients);
+        if (row.recipe) row.recipe = JSON.parse(row.recipe);
         return row;
       });
       res.json(parsedRows);
@@ -46,6 +47,7 @@ tables.forEach(table => {
         if (row.items) row.items = JSON.parse(row.items);
         if (row.payments) row.payments = JSON.parse(row.payments);
         if (row.ingredients) row.ingredients = JSON.parse(row.ingredients);
+        if (row.recipe) row.recipe = JSON.parse(row.recipe);
         res.json(row);
       } else {
         res.json(null);
