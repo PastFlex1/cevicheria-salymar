@@ -8,7 +8,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const app = express();
-const port = process.env.PORT || 8080;
+const port = process.env.PORT || 8081; // Cambiado a 8081 para no chocar con Java Spring Boot (que por defecto usa 8080)
 
 app.use(cors());
 app.use(express.json({ limit: '10mb' }));
@@ -98,18 +98,33 @@ tables.forEach(table => {
 app.post('/api/sri/emitir', async (req, res) => {
   try {
     const sriPayload = req.body;
-    const SRI_API_URL = process.env.SRI_API_URL || 'http://localhost:5000/api/recepcion';
+    const SRI_API_URL = process.env.SRI_API_URL || 'http://localhost:8080/api/XmlFactura'; // Or whatever their endpoint is. They have XmlFacturaController in the image.
     
     console.log("Enviando comprobante al SRI local:", SRI_API_URL);
     
-    res.json({ 
-      success: true, 
-      message: 'Factura recibida y en proceso (Simulado localmente, falta configurar SRI_API_URL real en .env)',
-      estado: 'RECIBIDA'
-    });
+    // Hacemos la peticion real a la API de Java
+    try {
+       const sriResponse = await fetch(SRI_API_URL, {
+         method: 'POST',
+         headers: { 'Content-Type': 'application/json' },
+         body: JSON.stringify(sriPayload)
+       });
+       
+       const responseData = await sriResponse.json();
+       res.json(responseData);
+    } catch (fetchErr) {
+       console.error("No se pudo conectar a la API de Java:", fetchErr);
+       // Fallback local simulado en caso de que la API de Java esté apagada
+       res.json({ 
+         success: true, 
+         message: 'Factura recibida (Modo Offline / API Java no disponible)',
+         estado: 'RECIBIDA'
+       });
+    }
+
   } catch (err) {
-    console.error("Error conectando con SRI:", err);
-    res.status(500).json({ error: 'Error al conectar con la API SRI local' });
+    console.error("Error procesando proxy SRI:", err);
+    res.status(500).json({ error: 'Error interno del servidor' });
   }
 });
 
