@@ -5,7 +5,7 @@ import { motion, AnimatePresence } from "motion/react";
 import * as ExcelJS from "exceljs";
 import { saveAs } from "file-saver";
 import { validarDocumento, detectarTipoDocumento, obtenerNombreTipoDocumento, limpiarDocumento } from "../lib/validators";
-import { generateInvoiceXML, generateAccessKey, SRIInvoiceData } from "../lib/sri";
+import { generateInvoiceXML, generateAccessKey, SRIInvoiceData, procesarYEnviarSRI } from "../lib/sri";
 import Pagination from "./Pagination";
 import { createPDFDoc } from "../lib/pdfGenerator";
 
@@ -125,7 +125,7 @@ export default function BillingDashboard({
     setItems((prev) => prev.map((i) => i.menuItem.id === id ? { ...i, quantity: qty } : i));
   };
 
-  const handleSaveInvoice = (printAfter: boolean = false) => {
+  const handleSaveInvoice = async (printAfter: boolean = false) => {
     if (items.length === 0) {
       showAlert("No hay productos para facturar.", "Sin Productos", "warning");
       return;
@@ -139,6 +139,58 @@ export default function BillingDashboard({
     if (!validacionDoc.valido) {
       showAlert("El documento del cliente no es válido: " + validacionDoc.mensaje, "Documento Inválido", "error");
       return;
+    }
+
+    // Si es factura, procesar con el SRI localmente a través de la API
+    let sriAuthResult = null;
+    if (documentType === "factura") {
+      try {
+        showAlert("Conectando con el SRI localmente (Firma, Recepción, Autorización)...", "Procesando", "info");
+        
+        // Armar el objeto para SRI
+        const sriData: SRIInvoiceData = {
+          rucEmisor: "1714809025001",
+          razonSocialEmisor: "ACHI LOPEZ JOSUE ANDRES",
+          nombreComercialEmisor: "CEVICHERIA SALYMAR",
+          dirMatriz: "PICHINCHA / QUITO / CHILIBULO / LA MAGDALENA ALTA S10 PURUHA OE6-203 Y OE6A HUALCOPO",
+          estab: "001", // Por defecto o extraer
+          ptoEmi: "001", 
+          secuencial: "000000001", // Aquí idealmente deberíamos calcular el secuencial antes
+          fechaEmision: new Date().toLocaleDateString("es-EC", { day: "2-digit", month: "2-digit", year: "numeric" }),
+          cliente: {
+            razonSocial: clientForm.businessName || "CONSUMIDOR FINAL",
+            identificacion: clientForm.documentId || "9999999999999",
+            direccion: clientForm.address || undefined,
+            email: clientForm.email || undefined
+          },
+          items: items.map(item => ({
+            codigo: item.menuItem.id,
+            descripcion: item.menuItem.name,
+            cantidad: item.quantity,
+            precioUnitario: item.menuItem.price,
+            descuento: 0
+          })),
+          formaPago: paymentMethod === "Efectivo" ? "01" : "20",
+        };
+
+        const xml = generateInvoiceXML(sriData);
+        
+        const result = await procesarYEnviarSRI(xml);
+        if (!result.success) {
+          showAlert("Error con el SRI: " + result.error, "Fallo SRI", "error");
+          return; // Detenemos la facturación si falla el SRI
+        }
+        
+        if (result.sriAuth?.estado !== "AUTORIZADO" && result.sriAuth?.estado !== "RECIBIDA") {
+           showAlert("El SRI respondió pero el estado es: " + result.sriAuth?.estado, "Advertencia SRI", "warning");
+        }
+        
+        sriAuthResult = result.sriAuth;
+
+      } catch (err: any) {
+        showAlert("Excepción al contactar API local: " + err.message, "Error crítico", "error");
+        return;
+      }
     }
 
     // Generate Invoice Number
@@ -182,6 +234,7 @@ export default function BillingDashboard({
       clientEmail: clientForm.email,
       clientAddress: clientForm.address,
       paymentMethod,
+      sriAuth: sriAuthResult, // Guardamos la autorización en la orden para usarla en el RIDE PDF
       payments: paymentMethod === "Mixto" ? mixedPayments : [{ method: paymentMethod, amount: total }],
       transactionNumber: paymentMethod === "Transferencia" ? transactionNumber : undefined,
       cashReceived: paymentMethod === "Efectivo" ? cashReceivedNum : undefined,
@@ -316,7 +369,7 @@ export default function BillingDashboard({
       formaPago: inv.paymentMethod === "Efectivo" ? "01" : "20",
     };
     try {
-      const doc = createPDFDoc(inv, sriData);
+      const doc = createPDFDoc(inv, sriData, inv.sriAuth);
       doc.save(`Factura_${inv.id}.pdf`);
       showAlert(`RIDE descargado exitosamente.`, "Éxito", "success");
     } catch (e) {

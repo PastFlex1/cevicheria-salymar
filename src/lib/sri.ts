@@ -281,7 +281,12 @@ export function generateCreditNoteXML(data: SRIInvoiceData): string {
   return xml;
 }
 
-export async function procesarYEnviarSRI(xml: string, apiBaseUrl = "http://localhost:8080/api/sri"): Promise<{ success: boolean; data?: any; error?: string; step?: string }> {
+export async function procesarYEnviarSRI(xml: string, apiBaseUrl = "http://localhost:8080/api/sri"): Promise<{ 
+  success: boolean; 
+  data?: any; 
+  error?: string;
+  sriAuth?: { authDate: string; authNumber: string; estado: string };
+}> {
   try {
     // 1. Extraer la Clave de Acceso del XML generado
     const claveMatch = xml.match(/<claveAcceso>(\d+)<\/claveAcceso>/);
@@ -323,8 +328,20 @@ export async function procesarYEnviarSRI(xml: string, apiBaseUrl = "http://local
     const autorizacionData = await autorizacionRes.text();
     console.log("Respuesta de Autorización:", autorizacionData);
 
+    // Extraer datos de autorización
+    const authDateMatch = autorizacionData.match(/<fechaAutorizacion[^>]*>(.*?)<\/fechaAutorizacion>/);
+    const authNumberMatch = autorizacionData.match(/<numeroAutorizacion[^>]*>(.*?)<\/numeroAutorizacion>/);
+    const estadoMatch = autorizacionData.match(/<estado[^>]*>(.*?)<\/estado>/);
+
+    const sriAuth = {
+      authDate: authDateMatch ? authDateMatch[1] : new Date().toLocaleString('es-ES'),
+      authNumber: authNumberMatch ? authNumberMatch[1] : claveAcceso,
+      estado: estadoMatch ? estadoMatch[1] : 'DESCONOCIDO'
+    };
+
     return {
       success: true,
+      sriAuth,
       data: {
         recepcion: recepcionData,
         autorizacion: autorizacionData,

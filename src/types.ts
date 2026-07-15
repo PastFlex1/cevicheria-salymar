@@ -74,6 +74,11 @@ export interface Order {
   createdBy?: string;
   cancelReason?: string;
   relatedOrderId?: string;
+  sriAuth?: {
+    authDate: string;
+    authNumber: string;
+    estado: string;
+  };
 }
 
 export interface Expense {
