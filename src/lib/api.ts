@@ -35,8 +35,8 @@ export const api = {
   }),
 
   // SRI Specific
-  emitirFacturaSRI: (payload: any) => fetchJSON(`/sri/emitir`, {
+  sriProcesar: (xml: string, claveAcceso: string) => fetchJSON(`/sri/procesar`, {
     method: 'POST',
-    body: JSON.stringify(payload),
+    body: JSON.stringify({ xml, claveAcceso }),
   })
 };

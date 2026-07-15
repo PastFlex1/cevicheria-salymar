@@ -87,7 +87,7 @@ import ProductsDashboard from "./components/ProductsDashboard";
 import CustomersDashboard from "./components/CustomersDashboard";
 import Pagination from "./components/Pagination";
 import { getInitials, getProductColor, hasImage } from "./lib/utils";
-import { generateInvoiceXML, downloadXML, SRIInvoiceData } from "./lib/sri";
+import { generateInvoiceXML, generateAccessKey, downloadXML, SRIInvoiceData } from "./lib/sri";
 import { createPDFDoc } from "./lib/pdfGenerator";
 
 // Utility for currency formatting
@@ -1452,15 +1452,71 @@ export default function App() {
       }
     }
 
+    let sriDataToUse: SRIInvoiceData | null = null;
+    let authResponse: any = null;
+
     if (documentType === "factura") {
       setSriStatus("signing");
-      await new Promise((r) => setTimeout(r, 1000));
-      setSriStatus("receiving");
-      await new Promise((r) => setTimeout(r, 1000));
-      setSriStatus("authorizing");
-      await new Promise((r) => setTimeout(r, 1000));
-      setSriStatus("done");
-      await new Promise((r) => setTimeout(r, 1500)); // Show "Factura Autorizada" before closing
+      
+      let finalOrderId = editingOrderId;
+      if (!finalOrderId) {
+        const currentMaxId = salesNotes.reduce((max, note) => {
+          const parts = note.id.split('-');
+          const lastPart = parts[parts.length - 1];
+          const numId = parseInt(lastPart.replace(/\D/g, ""), 10);
+          return !isNaN(numId) && numId > max ? numId : max;
+        }, 0);
+        finalOrderId = `001-001-${(currentMaxId + 1).toString().padStart(9, "0")}`;
+      }
+
+      const itemsToBill = cartItems.length > 0 ? cartItems : [];
+      const internalNumericCode = Math.floor(10000000 + Math.random() * 90000000).toString();
+      
+      const sriData: SRIInvoiceData = {
+        rucEmisor: "1714809025001",
+        razonSocialEmisor: "ACHI LOPEZ JOSUE ANDRES",
+        nombreComercialEmisor: "CEVICHERIA SALYMAR",
+        dirMatriz: "S10 PURUHA OE6-203 Y OE6A HUALCOPO, QUITO",
+        estab: "001",
+        ptoEmi: "001",
+        secuencial: finalOrderId.split('-').pop()?.replace(/\D/g, "") || "",
+        fechaEmision: new Date().toLocaleDateString("en-GB"),
+        cliente: {
+            razonSocial: checkoutForm.businessName || "CONSUMIDOR FINAL",
+            identificacion: checkoutForm.documentId || "9999999999999",
+            direccion: checkoutForm.address,
+            email: checkoutForm.email,
+        },
+        items: itemsToBill.map(item => ({
+            codigo: item.menuItem.id,
+            descripcion: item.menuItem.name,
+            cantidad: item.quantity,
+            precioUnitario: item.menuItem.price / 1.15,
+            descuento: 0
+        })),
+        formaPago: checkoutForm.paymentMethod === "Efectivo" ? "01" : "20",
+        codigoNumerico: internalNumericCode
+      };
+
+      try {
+        const xml = generateInvoiceXML(sriData);
+        
+        const dateParts = sriData.fechaEmision.split('/');
+        const formattedFecha = `${dateParts[0].padStart(2, '0')}/${dateParts[1].padStart(2, '0')}/${dateParts[2]}`;
+        const claveAcceso = generateAccessKey({ ...sriData, fechaEmision: formattedFecha }, "01");
+
+        const res = await api.sriProcesar(xml, claveAcceso);
+        authResponse = res;
+        sriDataToUse = sriData;
+        setSriStatus("done");
+        
+        downloadXML(xml, `factura_${finalOrderId.replace("#", "")}.xml`);
+      } catch (e: any) {
+        console.error("Error procesando SRI", e);
+        setValidationError("Error con el SRI: " + (e.message || "Error interno"));
+        setSriStatus("idle");
+        return; // Abort transaction
+      }
     }
 
     updateInventory(cartItems, false);
@@ -1574,43 +1630,9 @@ export default function App() {
       
       const order = processedOrder;
       
-      // Reconstruir subtotal por si no está (solo lo logramos con cartItems o si hay un order)
-      const itemsToBill = cartItems.length > 0 ? cartItems : (order?.items || []);
-      
-      if (order) {
-          const sriData: SRIInvoiceData = {
-            rucEmisor: "1714809025001",
-            razonSocialEmisor: "ACHI LOPEZ JOSUE ANDRES",
-            nombreComercialEmisor: "CEVICHERIA SALYMAR",
-            dirMatriz: "S10 PURUHA OE6-203 Y OE6A HUALCOPO, QUITO",
-            estab: "001",
-            ptoEmi: "001",
-            secuencial: order.id.split('-').pop()?.replace(/\D/g, "") || "",
-            fechaEmision: new Date().toLocaleDateString("en-GB"), // "DD/MM/YYYY" format
-            cliente: {
-                razonSocial: checkoutForm.businessName || "CONSUMIDOR FINAL",
-                identificacion: checkoutForm.documentId || "9999999999999",
-                direccion: checkoutForm.address,
-                email: checkoutForm.email,
-            },
-            items: itemsToBill.map(item => ({
-                codigo: item.menuItem.id,
-                descripcion: item.menuItem.name,
-                cantidad: item.quantity,
-                precioUnitario: item.menuItem.price / 1.15,
-                descuento: 0
-            })),
-            formaPago: checkoutForm.paymentMethod === "Efectivo" ? "01" : "20"
-          };
-          
-          try {
-            const xml = generateInvoiceXML(sriData);
-            downloadXML(xml, `factura_${order.id.replace("#", "")}.xml`);
-            setOrderForPDF(order);
-            setSriDataForPDF(sriData);
-          } catch (e) {
-            console.error("Error generando XML SRI", e);
-          }
+      if (order && sriDataToUse) {
+        setOrderForPDF(order);
+        setSriDataForPDF(sriDataToUse);
       }
     }
   };

@@ -97,36 +97,52 @@ tables.forEach(table => {
   });
 });
 
-app.post('/api/sri/emitir', async (req, res) => {
+app.post('/api/sri/procesar', async (req, res) => {
   try {
-    const sriPayload = req.body;
-    const SRI_API_URL = process.env.SRI_API_URL || 'http://localhost:8080/api/XmlFactura'; // Or whatever their endpoint is. They have XmlFacturaController in the image.
+    const { xml, claveAcceso } = req.body;
+    const JAVA_API_BASE = process.env.JAVA_API_BASE || 'http://localhost:8080/api/sri';
     
-    console.log("Enviando comprobante al SRI local:", SRI_API_URL);
+    console.log(`[SRI] Iniciando proceso para clave de acceso: ${claveAcceso}`);
     
-    // Hacemos la peticion real a la API de Java
-    try {
-       const sriResponse = await fetch(SRI_API_URL, {
-         method: 'POST',
-         headers: { 'Content-Type': 'application/json' },
-         body: JSON.stringify(sriPayload)
-       });
-       
-       const responseData = await sriResponse.json();
-       res.json(responseData);
-    } catch (fetchErr) {
-       console.error("No se pudo conectar a la API de Java:", fetchErr);
-       // Fallback local simulado en caso de que la API de Java esté apagada
-       res.json({ 
-         success: true, 
-         message: 'Factura recibida (Modo Offline / API Java no disponible)',
-         estado: 'RECIBIDA'
-       });
-    }
+    // 1. FIRMAR
+    console.log(`[SRI] 1. Firmando XML...`);
+    const firmarRes = await fetch(`${JAVA_API_BASE}/firmar`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain' },
+      body: xml
+    });
+    if (!firmarRes.ok) throw new Error("Error al firmar: " + await firmarRes.text());
+    const xmlFirmado = await firmarRes.text();
+    
+    // 2. RECEPCIÓN
+    console.log(`[SRI] 2. Enviando a Recepción...`);
+    const recepcionRes = await fetch(`${JAVA_API_BASE}/recepcion`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain' },
+      body: xmlFirmado
+    });
+    if (!recepcionRes.ok) throw new Error("Error en recepción: " + await recepcionRes.text());
+    const recepcionData = await recepcionRes.text(); // Podría ser SOAP XML
+    
+    // 3. AUTORIZACIÓN
+    console.log(`[SRI] 3. Solicitando Autorización...`);
+    const authRes = await fetch(`${JAVA_API_BASE}/autorizacion/${claveAcceso}`);
+    if (!authRes.ok) throw new Error("Error en autorización: " + await authRes.text());
+    const authData = await authRes.text(); // Podría ser SOAP XML
+    
+    console.log(`[SRI] ¡Proceso completado con éxito!`);
+    
+    res.json({ 
+      success: true, 
+      estado: "AUTORIZADO", 
+      xmlFirmado,
+      recepcionSoap: recepcionData,
+      autorizacionSoap: authData
+    });
 
   } catch (err) {
     console.error("Error procesando proxy SRI:", err);
-    res.status(500).json({ error: 'Error interno del servidor' });
+    res.status(500).json({ error: err.message || 'Error interno del servidor' });
   }
 });
 
