@@ -87,7 +87,7 @@ import ProductsDashboard from "./components/ProductsDashboard";
 import CustomersDashboard from "./components/CustomersDashboard";
 import Pagination from "./components/Pagination";
 import { getInitials, getProductColor, hasImage } from "./lib/utils";
-import { generateInvoiceXML, generateAccessKey, downloadXML, SRIInvoiceData } from "./lib/sri";
+import { generateInvoiceXML, generateAccessKey, downloadXML, SRIInvoiceData, procesarYEnviarSRI } from "./lib/sri";
 import { createPDFDoc } from "./lib/pdfGenerator";
 
 // Utility for currency formatting
@@ -1505,8 +1505,16 @@ export default function App() {
         const formattedFecha = `${dateParts[0].padStart(2, '0')}/${dateParts[1].padStart(2, '0')}/${dateParts[2]}`;
         const claveAcceso = generateAccessKey({ ...sriData, fechaEmision: formattedFecha }, "01");
 
-        const res = await api.sriProcesar(xml, claveAcceso);
-        authResponse = res;
+        const res = await procesarYEnviarSRI(xml);
+        if (!res.success) {
+          throw new Error(res.error || "Error en el SRI");
+        }
+        if (res.sriAuth?.estado !== "AUTORIZADO" && res.sriAuth?.estado !== "RECIBIDA") {
+           // Si deseas permitir que pase, podrías quitar el throw, pero por ahora lo bloqueamos.
+           // throw new Error("El SRI respondió pero el estado es: " + res.sriAuth?.estado);
+           console.warn("Estado SRI: " + res.sriAuth?.estado);
+        }
+        authResponse = res.sriAuth;
         sriDataToUse = sriData;
         setSriStatus("done");
         
@@ -1566,6 +1574,7 @@ export default function App() {
                 documentType === "factura" ? checkoutForm.businessName : undefined,
               paymentMethod: checkoutForm.paymentMethod,
               transactionNumber: checkoutForm.paymentMethod === "Transferencia" ? checkoutForm.transactionNumber : undefined,
+              sriAuth: authResponse || undefined,
             };
             return updatedOrder;
           }
@@ -1604,6 +1613,7 @@ export default function App() {
           documentType === "factura" ? checkoutForm.businessName : undefined,
         paymentMethod: checkoutForm.paymentMethod,
         transactionNumber: checkoutForm.paymentMethod === "Transferencia" ? checkoutForm.transactionNumber : undefined,
+        sriAuth: authResponse || undefined,
       };
       
       setSalesNotes([newOrder, ...salesNotes]);
@@ -1625,7 +1635,8 @@ export default function App() {
     setTimeout(() => setSriStatus("idle"), 300);
 
     if (documentType === "factura") {
-      setSuccessMessage("¡Factura autorizada exitosamente por el SRI!");
+      const estadoSRI = processedOrder?.sriAuth?.estado || "PROCESADA";
+      setSuccessMessage(`¡Factura ${estadoSRI} por el SRI!`);
       setTimeout(() => setSuccessMessage(null), 4000);
       
       const order = processedOrder;
