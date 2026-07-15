@@ -280,3 +280,63 @@ export function generateCreditNoteXML(data: SRIInvoiceData): string {
   xml += `</notaCredito>`;
   return xml;
 }
+
+export async function procesarYEnviarSRI(xml: string, apiBaseUrl = "http://localhost:8080/api/sri"): Promise<{ success: boolean; data?: any; error?: string; step?: string }> {
+  try {
+    // 1. Extraer la Clave de Acceso del XML generado
+    const claveMatch = xml.match(/<claveAcceso>(\d+)<\/claveAcceso>/);
+    if (!claveMatch) {
+      throw new Error("No se pudo extraer la clave de acceso del XML");
+    }
+    const claveAcceso = claveMatch[1];
+
+    // 2. Firmar el XML
+    console.log("1. Enviando a firmar XML...");
+    const firmarRes = await fetch(`${apiBaseUrl}/firmar`, {
+      method: "POST",
+      headers: { "Content-Type": "application/xml" }, // Asumiendo que el Body es un String plano
+      body: xml
+    });
+    
+    if (!firmarRes.ok) throw new Error("Error en la firma del XML. " + (await firmarRes.text()));
+    const xmlFirmado = await firmarRes.text();
+
+    // 3. Enviar a Recepción del SRI
+    console.log("2. Enviando a Recepción del SRI...");
+    const recepcionRes = await fetch(`${apiBaseUrl}/recepcion`, {
+      method: "POST",
+      headers: { "Content-Type": "application/xml" },
+      body: xmlFirmado
+    });
+
+    if (!recepcionRes.ok) throw new Error("Error en Recepción del SRI. " + (await recepcionRes.text()));
+    const recepcionData = await recepcionRes.text(); // El SOAP crudo
+    console.log("Respuesta de Recepción:", recepcionData);
+
+    // 4. Solicitar Autorización al SRI
+    console.log("3. Solicitando Autorización para la Clave:", claveAcceso);
+    const autorizacionRes = await fetch(`${apiBaseUrl}/autorizacion/${claveAcceso}`, {
+      method: "GET"
+    });
+
+    if (!autorizacionRes.ok) throw new Error("Error en Autorización del SRI. " + (await autorizacionRes.text()));
+    const autorizacionData = await autorizacionRes.text();
+    console.log("Respuesta de Autorización:", autorizacionData);
+
+    return {
+      success: true,
+      data: {
+        recepcion: recepcionData,
+        autorizacion: autorizacionData,
+        xmlFirmado,
+        claveAcceso
+      }
+    };
+  } catch (error: any) {
+    console.error("Error en proceso SRI:", error);
+    return {
+      success: false,
+      error: error.message
+    };
+  }
+}

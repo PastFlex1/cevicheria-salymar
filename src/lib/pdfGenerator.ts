@@ -11,7 +11,7 @@ const PAYMENT_MAP: Record<string, string> = {
   "20": "20 - OTROS CON UTILIZACIÓN DEL SISTEMA FINANCIERO",
 };
 
-export function createPDFDoc(order: Order, sriData: SRIInvoiceData) {
+export function createPDFDoc(order: Order, sriData: SRIInvoiceData, sriAuth?: { authDate: string; authNumber: string }) {
   const doc = new jsPDF() as any;
   const isFactura = true;
   
@@ -22,7 +22,7 @@ export function createPDFDoc(order: Order, sriData: SRIInvoiceData) {
 
   if (isFactura) {
     const accessKey = generateAccessKey({ ...sriData, fechaEmision: sriData.fechaEmision }, "01");
-    const authNumber = accessKey;
+    const authNumber = sriAuth?.authNumber || accessKey;
     const esConsumidorFinal = sriData.cliente.identificacion === "9999999999999";
     
     // Convert public PNG to base64 or just try to add by URL (jsPDF can load images from URL in same origin if formatted correctly, but usually needs a base64 or Image element)
@@ -83,7 +83,7 @@ export function createPDFDoc(order: Order, sriData: SRIInvoiceData) {
     doc.text('AUTORIZACIÓN:', 110, 69);
     doc.setFont('helvetica', 'normal');
     
-    const authValue = new Date().toLocaleString('es-ES');
+    const authValue = sriAuth?.authDate || new Date().toLocaleString('es-ES');
     doc.text(authValue, 150, 69);
     
     doc.setFont('helvetica', 'bold');
