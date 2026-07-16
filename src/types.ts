@@ -78,6 +78,7 @@ export interface Order {
     authDate: string;
     authNumber: string;
     estado: string;
+    autorizacionXML?: string;
   };
 }
 

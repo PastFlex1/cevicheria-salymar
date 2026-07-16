@@ -79,7 +79,8 @@ export async function initDB() {
       observation TEXT,
       createdBy TEXT,
       cancelReason TEXT,
-      relatedOrderId TEXT
+      relatedOrderId TEXT,
+      sriAuth TEXT
     );
 
     CREATE TABLE IF NOT EXISTS expenses (
@@ -157,26 +158,30 @@ export async function initDB() {
     
     CREATE TABLE IF NOT EXISTS cashSessions (
       id TEXT PRIMARY KEY,
-      startTime TEXT,
-      initialAmount REAL,
       status TEXT,
-      userId TEXT
+      openedBy TEXT,
+      openTime TEXT,
+      openingBalance REAL
     );
     
     CREATE TABLE IF NOT EXISTS cashClosings (
       id TEXT PRIMARY KEY,
-      sessionId TEXT,
-      startTime TEXT,
-      endTime TEXT,
-      initialAmount REAL,
-      finalAmount REAL,
-      expectedAmount REAL,
-      difference REAL,
-      salesTotal REAL,
-      expensesTotal REAL,
-      status TEXT,
-      notes TEXT,
-      userId TEXT
+      openTime TEXT,
+      closeTime TEXT,
+      openedBy TEXT,
+      closedBy TEXT,
+      openingBalance REAL,
+      cashSales REAL,
+      transferSales REAL,
+      cardSales REAL,
+      creditSales REAL,
+      expenses REAL,
+      expectedCash REAL,
+      actualCash REAL,
+      actualTransfers REAL,
+      differenceCash REAL,
+      differenceTransfers REAL,
+      notes TEXT
     );
   `;
 
@@ -187,7 +192,11 @@ export async function initDB() {
         reject(err);
       } else {
         console.log("Database tables initialized.");
-        resolve();
+        // Migración automática: Intentar agregar la columna sriAuth si no existe
+        db.run("ALTER TABLE salesNotes ADD COLUMN sriAuth TEXT", (alterErr) => {
+          // Ignoramos el error si la columna ya existe
+          resolve();
+        });
       }
     });
   });

@@ -281,7 +281,11 @@ export function generateCreditNoteXML(data: SRIInvoiceData): string {
   return xml;
 }
 
-export async function procesarYEnviarSRI(xml: string, apiBaseUrl = "http://localhost:8080/api/sri"): Promise<{ 
+export async function procesarYEnviarSRI(
+  xml: string, 
+  apiBaseUrl = "/api/sri/proxy",
+  onProgress?: (status: "signing" | "receiving" | "authorizing" | "done") => void
+): Promise<{ 
   success: boolean; 
   data?: any; 
   error?: string;
@@ -296,10 +300,11 @@ export async function procesarYEnviarSRI(xml: string, apiBaseUrl = "http://local
     const claveAcceso = claveMatch[1];
 
     // 2. Firmar el XML
-    console.log("1. Enviando a firmar XML...");
+    console.log("1. Enviando a firmar XML (Proxy)...");
+    if (onProgress) onProgress("signing");
     const firmarRes = await fetch(`${apiBaseUrl}/firmar`, {
       method: "POST",
-      headers: { "Content-Type": "application/xml" }, // Asumiendo que el Body es un String plano
+      headers: { "Content-Type": "text/plain" }, // Proxy pasará esto como raw text
       body: xml
     });
     
@@ -307,19 +312,34 @@ export async function procesarYEnviarSRI(xml: string, apiBaseUrl = "http://local
     const xmlFirmado = await firmarRes.text();
 
     // 3. Enviar a Recepción del SRI
-    console.log("2. Enviando a Recepción del SRI...");
+    console.log("2. Enviando a Recepción del SRI (Proxy)...");
+    if (onProgress) onProgress("receiving");
     const recepcionRes = await fetch(`${apiBaseUrl}/recepcion`, {
       method: "POST",
-      headers: { "Content-Type": "application/xml" },
+      headers: { "Content-Type": "text/plain" },
       body: xmlFirmado
     });
 
-    if (!recepcionRes.ok) throw new Error("Error en Recepción del SRI. " + (await recepcionRes.text()));
-    const recepcionData = await recepcionRes.text(); // El SOAP crudo
-    console.log("Respuesta de Recepción:", recepcionData);
+    const recepcionText = await recepcionRes.text();
+    if (!recepcionRes.ok) throw new Error("Error HTTP en Recepción del SRI. " + recepcionText);
+    
+    const estadoRecepcionMatch = recepcionText.match(/<estado[^>]*>(.*?)<\/estado>/);
+    const estadoRecepcion = estadoRecepcionMatch ? estadoRecepcionMatch[1] : null;
+
+    if (estadoRecepcion === "DEVUELTA") {
+      const mensajesMatch = recepcionText.match(/<mensaje>(.*?)<\/mensaje>/g);
+      let motivos = "Sin detalle de error";
+      if (mensajesMatch) {
+        motivos = mensajesMatch.map(m => m.replace(/<\/?mensaje>/g, '')).join(" | ");
+      }
+      throw new Error(`SRI DEVOLVIÓ el comprobante en Recepción: ${motivos}`);
+    }
+    
+    console.log("Respuesta de Recepción (SOAP):", recepcionText);
 
     // 4. Solicitar Autorización al SRI
-    console.log("3. Solicitando Autorización para la Clave:", claveAcceso);
+    console.log("3. Solicitando Autorización para la Clave (Proxy):", claveAcceso);
+    if (onProgress) onProgress("authorizing");
     const autorizacionRes = await fetch(`${apiBaseUrl}/autorizacion/${claveAcceso}`, {
       method: "GET"
     });
@@ -336,14 +356,16 @@ export async function procesarYEnviarSRI(xml: string, apiBaseUrl = "http://local
     const sriAuth = {
       authDate: authDateMatch ? authDateMatch[1] : new Date().toLocaleString('es-ES'),
       authNumber: authNumberMatch ? authNumberMatch[1] : claveAcceso,
-      estado: estadoMatch ? estadoMatch[1] : 'DESCONOCIDO'
+      estado: estadoMatch ? estadoMatch[1] : 'DESCONOCIDO',
+      autorizacionXML: autorizacionData
     };
 
+    if (onProgress) onProgress("done");
     return {
       success: true,
       sriAuth,
       data: {
-        recepcion: recepcionData,
+        recepcion: recepcionText,
         autorizacion: autorizacionData,
         xmlFirmado,
         claveAcceso

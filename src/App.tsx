@@ -1505,7 +1505,11 @@ export default function App() {
         const formattedFecha = `${dateParts[0].padStart(2, '0')}/${dateParts[1].padStart(2, '0')}/${dateParts[2]}`;
         const claveAcceso = generateAccessKey({ ...sriData, fechaEmision: formattedFecha }, "01");
 
-        const res = await procesarYEnviarSRI(xml);
+        const res = await procesarYEnviarSRI(
+          xml,
+          "/api/sri/proxy",
+          (status) => setSriStatus(status)
+        );
         if (!res.success) {
           throw new Error(res.error || "Error en el SRI");
         }
@@ -1516,9 +1520,13 @@ export default function App() {
         }
         authResponse = res.sriAuth;
         sriDataToUse = sriData;
-        setSriStatus("done");
         
-        downloadXML(xml, `factura_${finalOrderId.replace("#", "")}.xml`);
+        // Descargar el XML de la respuesta de Autorización
+        if (res.data && res.data.autorizacion) {
+          downloadXML(res.data.autorizacion, `autorizacion_${finalOrderId.replace("#", "")}.xml`);
+        } else {
+          downloadXML(xml, `factura_${finalOrderId.replace("#", "")}.xml`);
+        }
       } catch (e: any) {
         console.error("Error procesando SRI", e);
         setValidationError("Error con el SRI: " + (e.message || "Error interno"));
@@ -1636,7 +1644,7 @@ export default function App() {
 
     if (documentType === "factura") {
       const estadoSRI = processedOrder?.sriAuth?.estado || "PROCESADA";
-      setSuccessMessage(`¡Factura ${estadoSRI} por el SRI!`);
+      setSuccessMessage("Factura emitida correctamente");
       setTimeout(() => setSuccessMessage(null), 4000);
       
       const order = processedOrder;
@@ -1932,7 +1940,6 @@ export default function App() {
           <nav className="flex items-start justify-end lg:justify-start flex-wrap gap-x-2 gap-y-2 flex-1 pl-0 lg:pl-4 mt-1">
             {[
               { id: "Dashboard", icon: LayoutGrid, label: "Nuevo Pedido" },
-              { id: "Lista de Pedidos", icon: ClipboardList, label: "Gestión de Pedidos" },
               { id: "Notas de Venta", icon: ReceiptText, label: "Notas de Venta" },
               { id: "Facturación", icon: FileText, label: "Facturación" },
               { id: "Productos", icon: PackageOpen, label: "Menú de Ventas" },
@@ -2093,13 +2100,6 @@ export default function App() {
                   </div>
                 )}
               </>
-            ) : activeTab === "Lista de Pedidos" ? (
-              <OrdersManager
-                salesNotes={salesNotes}
-                updateOrderStatus={updateOrderStatus}
-                editOrder={editOrder}
-                checkoutOrder={checkoutOrder}
-              />
             ) : activeTab === "Cocina" ? (
               <KitchenDashboard
                 salesNotes={salesNotes}
@@ -2654,7 +2654,7 @@ export default function App() {
                     Detalles Generales
                   </h3>
                   <div className="flex gap-2 mb-3">
-                    {["mesa", "llevar", "delivery", "rapido"].map((type) => (
+                    {["mesa", "llevar"].map((type) => (
                       <button
                         key={type}
                         onClick={() => setOrderType(type as any)}
@@ -2672,32 +2672,6 @@ export default function App() {
                       onChange={(e) => setTableNumber(e.target.value)}
                       className="w-full bg-white border border-slate-200 rounded-2xl px-5 py-3 text-sm font-bold text-slate-800 focus:ring-2 focus:ring-blue-500 outline-none transition-shadow placeholder:text-slate-400 placeholder:font-medium"
                     />
-                  )}
-                  {orderType === "delivery" && (
-                    <div className="space-y-3 bg-white p-4 rounded-2xl border border-slate-200">
-                      <p className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Datos de Envío</p>
-                      <input
-                        type="text"
-                        placeholder="Nombre del cliente (Opcional)"
-                        value={checkoutForm.businessName}
-                        onChange={(e) => setCheckoutForm({...checkoutForm, businessName: e.target.value})}
-                        className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2 text-sm font-medium focus:ring-2 focus:ring-blue-500 outline-none"
-                      />
-                      <input
-                        type="text"
-                        placeholder="Teléfono (Opcional)"
-                        value={checkoutForm.phone}
-                        onChange={(e) => setCheckoutForm({...checkoutForm, phone: e.target.value})}
-                        className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2 text-sm font-medium focus:ring-2 focus:ring-blue-500 outline-none"
-                      />
-                      <textarea
-                        rows={2}
-                        placeholder="Dirección exacta (Opcional)"
-                        value={checkoutForm.address}
-                        onChange={(e) => setCheckoutForm({...checkoutForm, address: e.target.value})}
-                        className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2 text-sm font-medium focus:ring-2 focus:ring-blue-500 outline-none resize-none"
-                      />
-                    </div>
                   )}
                 </div>
 

@@ -12,6 +12,7 @@ const port = process.env.PORT || 8081; // Cambiado a 8081 para no chocar con Jav
 
 app.use(cors());
 app.use(express.json({ limit: '10mb' }));
+app.use(express.text({ type: 'text/plain', limit: '10mb' }));
 
 // Initialize DB
 initDB().catch(console.error);
@@ -144,6 +145,42 @@ app.post('/api/sri/procesar', async (req, res) => {
     console.error("Error procesando proxy SRI:", err);
     res.status(500).json({ error: err.message || 'Error interno del servidor' });
   }
+});
+
+// Proxy endpoints individuales para permitir progreso paso a paso en el UI sin CORS
+app.post('/api/sri/proxy/firmar', async (req, res) => {
+    try {
+        const JAVA_API_BASE = process.env.JAVA_API_BASE || 'http://localhost:8080/api/sri';
+        const javaRes = await fetch(`${JAVA_API_BASE}/firmar`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'text/plain' },
+            body: req.body
+        });
+        const text = await javaRes.text();
+        res.status(javaRes.status).send(text);
+    } catch(e) { res.status(500).send(e.message); }
+});
+
+app.post('/api/sri/proxy/recepcion', async (req, res) => {
+    try {
+        const JAVA_API_BASE = process.env.JAVA_API_BASE || 'http://localhost:8080/api/sri';
+        const javaRes = await fetch(`${JAVA_API_BASE}/recepcion`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'text/plain' },
+            body: req.body
+        });
+        const text = await javaRes.text();
+        res.status(javaRes.status).send(text);
+    } catch(e) { res.status(500).send(e.message); }
+});
+
+app.get('/api/sri/proxy/autorizacion/:clave', async (req, res) => {
+    try {
+        const JAVA_API_BASE = process.env.JAVA_API_BASE || 'http://localhost:8080/api/sri';
+        const javaRes = await fetch(`${JAVA_API_BASE}/autorizacion/${req.params.clave}`);
+        const text = await javaRes.text();
+        res.status(javaRes.status).send(text);
+    } catch(e) { res.status(500).send(e.message); }
 });
 
 app.use(express.static(path.join(__dirname, 'dist')));

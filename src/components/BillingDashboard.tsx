@@ -380,6 +380,13 @@ export default function BillingDashboard({
 
   const downloadXML = (inv: Order) => {
     try {
+      if (inv.sriAuth?.autorizacionXML) {
+        const blob = new Blob([inv.sriAuth.autorizacionXML], { type: "application/xml;charset=utf-8" });
+        saveAs(blob, `autorizacion_${inv.id}.xml`);
+        showAlert(`XML original de autorización descargado`, "Éxito", "success");
+        return;
+      }
+
       const sriData: SRIInvoiceData = {
         rucEmisor: "1714809025001",
         razonSocialEmisor: "ACHI LOPEZ JOSUE ANDRES",

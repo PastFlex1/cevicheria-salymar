@@ -83,7 +83,7 @@ export function createPDFDoc(order: Order, sriData: SRIInvoiceData, sriAuth?: { 
     doc.text('AUTORIZACIÓN:', 110, 69);
     doc.setFont('helvetica', 'normal');
     
-    const authValue = sriAuth?.authDate || new Date().toLocaleString('es-ES');
+    const authValue = sriAuth?.authDate || new Date(order.date).toLocaleString('es-ES');
     doc.text(authValue, 150, 69);
     
     doc.setFont('helvetica', 'bold');
