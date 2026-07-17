@@ -75,10 +75,18 @@ export interface Order {
   cancelReason?: string;
   relatedOrderId?: string;
   sriAuth?: {
+    secuencial?: string;
     authDate: string;
     authNumber: string;
     estado: string;
     autorizacionXML?: string;
+    creditNote?: {
+      secuencial: string;
+      authDate: string;
+      authNumber: string;
+      estado: string;
+      autorizacionXML?: string;
+    };
   };
 }
 

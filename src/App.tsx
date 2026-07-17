@@ -243,6 +243,15 @@ export default function App() {
     return () => clearTimeout(timer);
   }, []);
 
+  const [hasAlertedCaja, setHasAlertedCaja] = useState(false);
+
+  useEffect(() => {
+    if (!isLoading && !hasAlertedCaja) {
+      setHasAlertedCaja(true);
+      showAlert("Por favor, recuerde realizar el cierre de caja.", "Cierre de Caja", "warning");
+    }
+  }, [isLoading, hasAlertedCaja]);
+
   // Sincronización con Backend Local
   useEffect(() => {
     const loadData = async () => {
@@ -283,7 +292,17 @@ export default function App() {
         setInventoryCombosState(invCombosData);
         setMenuCategoriesState(categoriesData);
         setMenuProductsState(productsData);
-        setSalesNotesState(salesNotesData);
+        const parsedSalesNotes = (salesNotesData || []).map((note: any) => {
+          if (note.sriAuth && typeof note.sriAuth === 'string') {
+            try {
+              note.sriAuth = JSON.parse(note.sriAuth);
+            } catch (e) {
+              console.error("Error parsing salesNote sriAuth:", e);
+            }
+          }
+          return note;
+        });
+        setSalesNotesState(parsedSalesNotes);
         setCustomersState(customersData);
         if (cashSessionData && cashSessionData.id) {
            setActiveSessionState(cashSessionData);
@@ -792,6 +811,32 @@ export default function App() {
 
     setInventoryItems(updatedMateriaPrima);
     setInventoryBebidas(updatedBebidas);
+  };
+
+  const handleClearTestData = async () => {
+    const confirmTx = window.confirm(
+      "¿Seguro que deseas limpiar todos los datos transaccionales de prueba (Ventas/Facturas, Gastos, Sesiones de Caja y Clientes)?\n\nEsto dejará la base de datos limpia de transacciones pero mantendrá el Menú, Bodega y Proveedores."
+    );
+    if (!confirmTx) return;
+
+    const clearAll = window.confirm(
+      "¿También deseas borrar la configuración completa (Menú de Ventas, Bodega, Categorías y Proveedores)?\n\nPresiona 'Aceptar' para borrar absolutamente todo. Presiona 'Cancelar' para mantenerlos."
+    );
+
+    try {
+      const url = `/api/reset-database${clearAll ? "?all=true" : ""}`;
+      const response = await fetch(url, { method: "POST" });
+      if (response.ok) {
+        alert("¡Base de datos limpiada con éxito! La aplicación se recargará.");
+        window.location.reload();
+      } else {
+        const txt = await response.text();
+        alert("Error al limpiar la base de datos: " + txt);
+      }
+    } catch (e: any) {
+      console.error(e);
+      alert("Error de conexión: " + e.message);
+    }
   };
 
   const handleCheckout = () => {
@@ -1522,8 +1567,18 @@ export default function App() {
         sriDataToUse = sriData;
         
         // Descargar el XML de la respuesta de Autorización
-        if (res.data && res.data.autorizacion) {
-          downloadXML(res.data.autorizacion, `autorizacion_${finalOrderId.replace("#", "")}.xml`);
+        if (res.data && res.data.xmlFirmado) {
+          let xmlToDownload = res.data.xmlFirmado;
+          let filename = `factura_firmada_${finalOrderId.replace("#", "")}.xml`;
+
+          if (res.sriAuth?.autorizacionXML) {
+            const authMatch = res.sriAuth.autorizacionXML.match(/<autorizacion>([\s\S]*?)<\/autorizacion>/);
+            if (authMatch) {
+              xmlToDownload = `<?xml version="1.0" encoding="UTF-8"?>\n<autorizacion>${authMatch[1]}</autorizacion>`;
+              filename = `autorizacion_${finalOrderId.replace("#", "")}.xml`;
+            }
+          }
+          downloadXML(xmlToDownload, filename);
         } else {
           downloadXML(xml, `factura_${finalOrderId.replace("#", "")}.xml`);
         }
@@ -1590,7 +1645,9 @@ export default function App() {
         })
       );
       if (updatedOrder) {
-          setPreviewOrder(updatedOrder);
+          if (documentType !== "factura") {
+            setPreviewOrder(updatedOrder);
+          }
           processedOrder = updatedOrder;
       }
     } else {
@@ -1625,7 +1682,9 @@ export default function App() {
       };
       
       setSalesNotes([newOrder, ...salesNotes]);
-      setPreviewOrder(newOrder);
+      if (documentType !== "factura") {
+        setPreviewOrder(newOrder);
+      }
       processedOrder = newOrder;
     }
     setCartItems([]);
@@ -1643,16 +1702,21 @@ export default function App() {
     setTimeout(() => setSriStatus("idle"), 300);
 
     if (documentType === "factura") {
-      const estadoSRI = processedOrder?.sriAuth?.estado || "PROCESADA";
       setSuccessMessage("Factura emitida correctamente");
-      setTimeout(() => setSuccessMessage(null), 4000);
+      setTimeout(() => setSuccessMessage(null), 3000);
       
       const order = processedOrder;
-      
       if (order && sriDataToUse) {
         setOrderForPDF(order);
         setSriDataForPDF(sriDataToUse);
       }
+
+      // Mostrar el comprobante después de un delay de 2.5s para no tapar el mensaje
+      setTimeout(() => {
+        if (order) {
+          setPreviewOrder(order);
+        }
+      }, 2500);
     }
   };
 
@@ -1912,7 +1976,7 @@ export default function App() {
             initial={{ opacity: 0, y: -50, scale: 0.9 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: -20, scale: 0.9 }}
-            className="absolute top-10 left-1/2 -translate-x-1/2 z-[100] bg-emerald-500 text-white px-8 py-4 rounded-2xl shadow-2xl flex items-center gap-3 font-bold text-lg"
+            className="absolute top-10 left-1/2 -translate-x-1/2 z-[150] bg-emerald-500 text-white px-8 py-4 rounded-2xl shadow-2xl flex items-center gap-3 font-bold text-lg"
           >
             <CheckCircle className="w-6 h-6" />
             {successMessage}
@@ -1960,6 +2024,15 @@ export default function App() {
               </button>
             ))}
           </nav>
+          
+          <button
+            onClick={handleClearTestData}
+            className="flex items-center gap-1.5 text-[11px] xl:text-xs font-bold py-2 px-3 rounded-xl bg-red-50 text-red-600 hover:bg-red-100 transition-colors whitespace-nowrap mt-1 cursor-pointer"
+            title="Limpiar Datos de Prueba"
+          >
+            <Trash2 className="w-4 h-4" />
+            <span className="hidden sm:inline">Limpiar Datos</span>
+          </button>
         </header>
 
         {/* Main Body */}
@@ -2062,8 +2135,7 @@ export default function App() {
                                   {item.description}
                                 </p>
                                 <p className="text-[10px] text-slate-400 font-medium">
-                                  {item.available} Disponibles • {item.sold}{" "}
-                                  Vendidos
+                                  {item.sold} Vendidos
                                 </p>
                               </div>
                             </div>

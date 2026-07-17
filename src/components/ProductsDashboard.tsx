@@ -361,7 +361,6 @@ export default function ProductsDashboard({
                       <th className="p-4 font-bold">Categoría</th>
                       <th className="p-4 font-bold">Precio</th>
                       <th className="p-4 font-bold">IVA</th>
-                      <th className="p-4 font-bold">Stock</th>
                       <th className="p-4 font-bold text-center">Estado</th>
                       <th className="p-4 font-bold text-right">Acciones</th>
                     </tr>
@@ -389,16 +388,6 @@ export default function ProductsDashboard({
                         </td>
                         <td className="p-4 font-bold text-indigo-600">{formatCurrency(p.price)}</td>
                         <td className="p-4 text-slate-600">{p.aplicaIva ? "Sí (15%)" : "No"}</td>
-                        <td className="p-4">
-                          {(() => {
-                            const currentStock = getProductStock(p);
-                            return (
-                              <span className={`font-bold ${currentStock <= (p.stockMinimo || 0) ? "text-red-500" : "text-slate-600"}`}>
-                                {currentStock}
-                              </span>
-                            );
-                          })()}
-                        </td>
                         <td className="p-4 text-center">
                           <button
                             onClick={() => toggleStatus(p)}

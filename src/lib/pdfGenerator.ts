@@ -21,7 +21,8 @@ export function createPDFDoc(order: Order, sriData: SRIInvoiceData, sriAuth?: { 
   const displayNum = `${estab}-${ptoEmi}-${secuencial}`;
 
   if (isFactura) {
-    const accessKey = generateAccessKey({ ...sriData, fechaEmision: sriData.fechaEmision }, "01");
+    const activeCodDoc = sriData.facturaModificada ? "04" : (order.documentType === "nota" ? "02" : "01");
+    const accessKey = generateAccessKey({ ...sriData, fechaEmision: sriData.fechaEmision }, activeCodDoc);
     const authNumber = sriAuth?.authNumber || accessKey;
     const esConsumidorFinal = sriData.cliente.identificacion === "9999999999999";
     
@@ -66,7 +67,10 @@ export function createPDFDoc(order: Order, sriData: SRIInvoiceData, sriAuth?: { 
     doc.text(`R.U.C.: ${sriData.rucEmisor}`, 110, 20);
     
     doc.setFontSize(14);
-    doc.text('FACTURA', 110, 30);
+    let docTitle = 'FACTURA';
+    if (sriData.facturaModificada) docTitle = 'NOTA DE CRÉDITO';
+    else if (order.documentType === 'nota') docTitle = 'NOTA DE VENTA';
+    doc.text(docTitle, 110, 30);
     
     doc.setFontSize(11);
     doc.text(`No. ${displayNum}`, 110, 40);
@@ -83,13 +87,31 @@ export function createPDFDoc(order: Order, sriData: SRIInvoiceData, sriAuth?: { 
     doc.text('AUTORIZACIÓN:', 110, 69);
     doc.setFont('helvetica', 'normal');
     
-    const authValue = sriAuth?.authDate || new Date(order.date).toLocaleString('es-ES');
+    let authValue = sriAuth?.authDate || new Date(order.date).toLocaleString('es-ES');
+    if (authValue && (authValue.includes('T') || authValue.includes('-'))) {
+      try {
+        const d = new Date(authValue);
+        if (!isNaN(d.getTime())) {
+          const day = d.getDate().toString().padStart(2, '0');
+          const month = (d.getMonth() + 1).toString().padStart(2, '0');
+          const year = d.getFullYear();
+          const hours = d.getHours().toString().padStart(2, '0');
+          const minutes = d.getMinutes().toString().padStart(2, '0');
+          const seconds = d.getSeconds().toString().padStart(2, '0');
+          authValue = `${day}/${month}/${year} ${hours}:${minutes}:${seconds}`;
+        }
+      } catch (e) {
+        console.error("Error formatting authValue:", e);
+      }
+    }
     doc.text(authValue, 150, 69);
     
     doc.setFont('helvetica', 'bold');
     doc.text('AMBIENTE:', 110, 76);
     doc.setFont('helvetica', 'normal');
-    doc.text('PRUEBAS', 150, 76); 
+    const envChar = accessKey.charAt(23);
+    const envLabel = envChar === "2" ? "PRODUCCIÓN" : "PRUEBAS";
+    doc.text(envLabel, 150, 76); 
     
     doc.setFont('helvetica', 'bold');
     doc.text('EMISIÓN:', 110, 83);
@@ -160,8 +182,32 @@ export function createPDFDoc(order: Order, sriData: SRIInvoiceData, sriAuth?: { 
       ];
     });
 
+    let autoTableStartY = 142;
+    if (sriData.facturaModificada) {
+      doc.setLineWidth(0.3);
+      doc.roundedRect(10, 140, 190, 15, 1, 1, 'S');
+      doc.setFontSize(8);
+      doc.setFont('helvetica', 'normal');
+      
+      doc.text(`Comprobante que modifica:`, 12, 144);
+      doc.setFont('helvetica', 'bold');
+      doc.text(`FACTURA ${sriData.facturaModificada.numero}`, 65, 144);
+      
+      doc.setFont('helvetica', 'normal');
+      doc.text(`Fecha Emisión (comprobante modificado):`, 12, 149);
+      doc.setFont('helvetica', 'bold');
+      doc.text(sriData.facturaModificada.fecha, 75, 149);
+      
+      doc.setFont('helvetica', 'normal');
+      doc.text(`Razón de Modificación:`, 130, 144);
+      doc.setFont('helvetica', 'bold');
+      doc.text(`ANULACION DE FACTURA`, 130, 149);
+      
+      autoTableStartY = 160;
+    }
+
     autoTable(doc, {
-      startY: 142,
+      startY: autoTableStartY,
       margin: { left: 10, right: 10 },
       head: [['Cod. Principal', 'Cod. Auxiliar', 'Cantidad', 'Descripción', 'Detalle Adicional', 'Precio Unitario', 'Subsidio', 'Precio sin Subsidio', 'Descuento', 'Precio Total']],
       body: tableRows,
@@ -210,9 +256,10 @@ export function createPDFDoc(order: Order, sriData: SRIInvoiceData, sriAuth?: { 
     doc.text(methodDesc, 12, tablePaymentY + 11.5, { maxWidth: 76 });
 
     // Calculate total
+    const isNotaVenta = order.documentType === 'nota';
     const totalDescuento = sriData.items.reduce((acc, item) => acc + (item.descuento || 0), 0);
     const subtotal = sriData.items.reduce((acc, item) => acc + (item.cantidad * item.precioUnitario), 0) - totalDescuento;
-    const iva = subtotal * 0.15;
+    const iva = isNotaVenta ? 0.00 : subtotal * 0.15;
     const total = subtotal + iva;
 
     doc.rect(90, tablePaymentY + 6, 30, 8, 'S');
@@ -230,16 +277,29 @@ export function createPDFDoc(order: Order, sriData: SRIInvoiceData, sriAuth?: { 
       currentY += 5;
     };
 
-    drawTotalRow('SUBTOTAL 15%', `${subtotal.toFixed(2)}`); 
-    drawTotalRow('SUBTOTAL NO OBJETO DE IVA', '0.00');
-    drawTotalRow('SUBTOTAL EXENTO DE IVA', '0.00');
-    drawTotalRow('SUBTOTAL SIN IMPUESTOS', `${subtotal.toFixed(2)}`);
-    drawTotalRow('TOTAL DESCUENTO', `${totalDescuento.toFixed(2)}`);
-    drawTotalRow('ICE', '0.00');
-    drawTotalRow('IRBPNR', '0.00');
-    drawTotalRow('IVA 15%', `${iva.toFixed(2)}`); 
-    drawTotalRow('PROPINA', '0.00');
-    drawTotalRow('VALOR TOTAL', `${total.toFixed(2)}`, true);
+    if (isNotaVenta) {
+      drawTotalRow('SUBTOTAL 0%', `${subtotal.toFixed(2)}`); 
+      drawTotalRow('SUBTOTAL NO OBJETO DE IVA', '0.00');
+      drawTotalRow('SUBTOTAL EXENTO DE IVA', '0.00');
+      drawTotalRow('SUBTOTAL SIN IMPUESTOS', `${subtotal.toFixed(2)}`);
+      drawTotalRow('TOTAL DESCUENTO', `${totalDescuento.toFixed(2)}`);
+      drawTotalRow('ICE', '0.00');
+      drawTotalRow('IRBPNR', '0.00');
+      drawTotalRow('IVA 0%', '0.00'); 
+      drawTotalRow('PROPINA', '0.00');
+      drawTotalRow('VALOR TOTAL', `${total.toFixed(2)}`, true);
+    } else {
+      drawTotalRow('SUBTOTAL 15%', `${subtotal.toFixed(2)}`); 
+      drawTotalRow('SUBTOTAL NO OBJETO DE IVA', '0.00');
+      drawTotalRow('SUBTOTAL EXENTO DE IVA', '0.00');
+      drawTotalRow('SUBTOTAL SIN IMPUESTOS', `${subtotal.toFixed(2)}`);
+      drawTotalRow('TOTAL DESCUENTO', `${totalDescuento.toFixed(2)}`);
+      drawTotalRow('ICE', '0.00');
+      drawTotalRow('IRBPNR', '0.00');
+      drawTotalRow('IVA 15%', `${iva.toFixed(2)}`); 
+      drawTotalRow('PROPINA', '0.00');
+      drawTotalRow('VALOR TOTAL', `${total.toFixed(2)}`, true);
+    }
 
     currentY += 2;
     doc.rect(totalX, currentY, 75, 10, 'S');

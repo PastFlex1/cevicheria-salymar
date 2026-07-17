@@ -5,7 +5,7 @@ import { motion, AnimatePresence } from "motion/react";
 import * as ExcelJS from "exceljs";
 import { saveAs } from "file-saver";
 import { validarDocumento, detectarTipoDocumento, obtenerNombreTipoDocumento, limpiarDocumento } from "../lib/validators";
-import { generateInvoiceXML, generateAccessKey, SRIInvoiceData, procesarYEnviarSRI } from "../lib/sri";
+import { generateInvoiceXML, generateAccessKey, SRIInvoiceData, procesarYEnviarSRI, generateCreditNoteXML, generateNotaVentaXML } from "../lib/sri";
 import Pagination from "./Pagination";
 import { createPDFDoc } from "../lib/pdfGenerator";
 
@@ -141,22 +141,25 @@ export default function BillingDashboard({
       return;
     }
 
-    // Si es factura, procesar con el SRI localmente a través de la API
+    // Si es factura o nota de venta, procesar con el SRI localmente a través de la API
     let sriAuthResult = null;
-    if (documentType === "factura") {
+    if (documentType === "factura" || documentType === "nota") {
       try {
-        showAlert("Conectando con el SRI localmente (Firma, Recepción, Autorización)...", "Procesando", "info");
+        showAlert(`Conectando con el SRI localmente para emitir ${documentType === "factura" ? "Factura" : "Nota de Venta"} (Firma, Recepción, Autorización)...`, "Procesando", "info");
         
         // Armar el objeto para SRI
+        const today = new Date();
+        const formattedFecha = `${today.getDate().toString().padStart(2, "0")}/${(today.getMonth() + 1).toString().padStart(2, "0")}/${today.getFullYear()}`;
+
         const sriData: SRIInvoiceData = {
           rucEmisor: "1714809025001",
           razonSocialEmisor: "ACHI LOPEZ JOSUE ANDRES",
           nombreComercialEmisor: "CEVICHERIA SALYMAR",
           dirMatriz: "PICHINCHA / QUITO / CHILIBULO / LA MAGDALENA ALTA S10 PURUHA OE6-203 Y OE6A HUALCOPO",
-          estab: "001", // Por defecto o extraer
+          estab: "001",
           ptoEmi: "001", 
-          secuencial: "000000001", // Aquí idealmente deberíamos calcular el secuencial antes
-          fechaEmision: new Date().toLocaleDateString("es-EC", { day: "2-digit", month: "2-digit", year: "numeric" }),
+          secuencial: "000000001", 
+          fechaEmision: formattedFecha,
           cliente: {
             razonSocial: clientForm.businessName || "CONSUMIDOR FINAL",
             identificacion: clientForm.documentId || "9999999999999",
@@ -167,18 +170,20 @@ export default function BillingDashboard({
             codigo: item.menuItem.id,
             descripcion: item.menuItem.name,
             cantidad: item.quantity,
-            precioUnitario: item.menuItem.price,
+            precioUnitario: item.menuItem.price / 1.15,
             descuento: 0
           })),
           formaPago: paymentMethod === "Efectivo" ? "01" : "20",
         };
 
-        const xml = generateInvoiceXML(sriData);
+        const xml = documentType === "factura" 
+          ? generateInvoiceXML(sriData) 
+          : generateNotaVentaXML(sriData);
         
         const result = await procesarYEnviarSRI(xml);
         if (!result.success) {
           showAlert("Error con el SRI: " + result.error, "Fallo SRI", "error");
-          return; // Detenemos la facturación si falla el SRI
+          return;
         }
         
         if (result.sriAuth?.estado !== "AUTORIZADO" && result.sriAuth?.estado !== "RECIBIDA") {
@@ -296,11 +301,115 @@ export default function BillingDashboard({
   const [invoiceToAnular, setInvoiceToAnular] = useState<string | null>(null);
   const [cancelReason, setCancelReason] = useState("");
 
-  const handleAnular = () => {
-    if (invoiceToAnular) {
-      const inv = salesNotes.find(s => s.id === invoiceToAnular);
+  const handleAnular = async () => {
+    const idToAnular = invoiceToAnular;
+    setInvoiceToAnular(null);
+    setCancelReason("");
+
+    if (idToAnular) {
+      const inv = salesNotes.find(s => s.id === idToAnular);
       if (inv) {
-        updateOrder({ ...inv, status: "anulada", cancelReason });
+        // Si es una factura autorizada por el SRI, emitimos la Nota de Crédito
+        if (inv.documentType === "factura" && inv.sriAuth?.authNumber) {
+          showAlert("Conectando con el SRI localmente para emitir la Nota de Crédito...", "Emitiendo Nota de Crédito", "info");
+          
+          try {
+            // 1. Calcular el secuencial para la Nota de Crédito
+            const ncCount = salesNotes.filter(n => n.sriAuth?.creditNote).length + 1;
+            const ncSecuencial = ncCount.toString().padStart(9, "0");
+
+            // 2. Preparar los datos para la Nota de Crédito
+            const dSustento = new Date(inv.date);
+            const formattedFechaSustento = `${dSustento.getDate().toString().padStart(2, "0")}/${(dSustento.getMonth() + 1).toString().padStart(2, "0")}/${dSustento.getFullYear()}`;
+            
+            const today = new Date();
+            const formattedFechaNC = `${today.getDate().toString().padStart(2, "0")}/${(today.getMonth() + 1).toString().padStart(2, "0")}/${today.getFullYear()}`;
+
+            const cleanId = String(inv.sriAuth?.secuencial || inv.id).replace(/\D/g, "");
+            const activeSequential = cleanId.slice(-9).padStart(9, "0");
+
+            const sriData: SRIInvoiceData = {
+              rucEmisor: "1714809025001",
+              razonSocialEmisor: "ACHI LOPEZ JOSUE ANDRES",
+              nombreComercialEmisor: "CEVICHERIA SALYMAR",
+              dirMatriz: "PICHINCHA / QUITO / CHILIBULO / LA MAGDALENA ALTA S10 PURUHA OE6-203 Y OE6A HUALCOPO",
+              estab: "001",
+              ptoEmi: "001",
+              secuencial: ncSecuencial,
+              fechaEmision: formattedFechaNC,
+              cliente: {
+                razonSocial: inv.businessName || inv.customerName || "CONSUMIDOR FINAL",
+                identificacion: inv.ruc || inv.clientId || "9999999999999",
+                direccion: inv.clientAddress || undefined,
+                email: inv.clientEmail || undefined
+              },
+              items: inv.items.map(item => ({
+                codigo: item.menuItem.id,
+                descripcion: item.menuItem.name,
+                cantidad: item.quantity,
+                precioUnitario: item.menuItem.price / 1.15,
+                descuento: 0
+              })),
+              formaPago: inv.paymentMethod === "Efectivo" ? "01" : "20",
+              facturaModificada: {
+                numero: `001-001-${activeSequential}`,
+                fecha: formattedFechaSustento
+              }
+            };
+
+            const xml = generateCreditNoteXML(sriData);
+            
+            const result = await procesarYEnviarSRI(xml);
+            if (!result.success) {
+              showAlert("Error con el SRI al emitir la Nota de Crédito: " + result.error, "Fallo SRI", "error");
+              return;
+            }
+
+            if (result.sriAuth?.estado !== "AUTORIZADO" && result.sriAuth?.estado !== "RECIBIDA") {
+              showAlert("El SRI respondió pero la Nota de Crédito quedó en estado: " + result.sriAuth?.estado, "Advertencia SRI", "warning");
+            }
+
+            // 3. Guardar la Nota de Crédito en el objeto de la orden anulada
+            const creditNote = {
+              ...result.sriAuth,
+              secuencial: ncSecuencial
+            };
+
+            const updatedAuth = {
+              ...inv.sriAuth,
+              creditNote
+            };
+
+            updateOrder({
+              ...inv,
+              status: "anulada",
+              cancelReason: cancelReason || "ANULACIÓN DE COMPROBANTE",
+              sriAuth: updatedAuth
+            });
+
+            showAlert("Nota de Crédito emitida y factura anulada con éxito.", "Venta Anulada", "success");
+
+            // 4. Descargar automáticamente el XML de la Nota de Crédito autorizada
+            if (creditNote.autorizacionXML) {
+              let xmlToDownload = creditNote.autorizacionXML;
+              const authMatch = creditNote.autorizacionXML.match(/<autorizacion>([\s\S]*?)<\/autorizacion>/);
+              if (authMatch) {
+                xmlToDownload = `<?xml version="1.0" encoding="UTF-8"?>\n<autorizacion>${authMatch[1]}</autorizacion>`;
+              }
+              const blob = new Blob([xmlToDownload], { type: "application/xml;charset=utf-8" });
+              saveAs(blob, `nota_credito_autorizacion_${inv.id}.xml`);
+            }
+
+          } catch (err: any) {
+            console.error(err);
+            showAlert("Ocurrió un error inesperado al procesar la Nota de Crédito: " + err.message, "Error Crítico", "error");
+            return;
+          }
+        } else {
+          // Si no es una factura autorizada por el SRI, se anula únicamente a nivel local
+          updateOrder({ ...inv, status: "anulada", cancelReason: cancelReason || "ANULACIÓN DE COMPROBANTE" });
+          showAlert("Comprobante anulado localmente con éxito.", "Venta Anulada", "success");
+        }
       }
       setInvoiceToAnular(null);
       setCancelReason("");
@@ -339,7 +448,10 @@ export default function BillingDashboard({
 
   // Download PDF
   const downloadPdf = (inv: Order) => {
-    showAlert(`Generando PDF de ${inv.id}...`, "Generando RIDE", "info");
+    const isNC = inv.status === "anulada" && inv.sriAuth?.creditNote;
+    const isNota = inv.documentType === "nota";
+    showAlert(`Generando PDF de ${isNC ? "Nota de Crédito" : (isNota ? "Nota de Venta" : "Factura")}...`, "Generando RIDE", "info");
+    
     const sriData: SRIInvoiceData = {
       rucEmisor: "1714809025001",
       razonSocialEmisor: "ACHI LOPEZ JOSUE ANDRES",
@@ -347,7 +459,9 @@ export default function BillingDashboard({
       dirMatriz: "PICHINCHA / QUITO / CHILIBULO / LA MAGDALENA ALTA S10 PURUHA OE6-203 Y OE6A HUALCOPO",
       estab: inv.id.includes("-") ? inv.id.split("-")[0] : "001",
       ptoEmi: inv.id.includes("-") ? inv.id.split("-")[1] : "001",
-      secuencial: inv.id.includes("-") ? inv.id.split("-")[2] : inv.id.replace("#", "").padStart(9, "0"),
+      secuencial: isNC 
+        ? inv.sriAuth.creditNote.secuencial 
+        : (inv.id.includes("-") ? inv.id.split("-")[2] : inv.id.replace("#", "").padStart(9, "0")),
       fechaEmision: new Date(inv.date).toLocaleDateString("es-EC", {
         day: "2-digit",
         month: "2-digit",
@@ -363,14 +477,25 @@ export default function BillingDashboard({
         codigo: item.menuItem.id,
         descripcion: item.menuItem.name,
         cantidad: item.quantity,
-        precioUnitario: item.menuItem.price,
+        precioUnitario: isNota ? item.menuItem.price : item.menuItem.price / 1.15,
         descuento: 0
       })),
       formaPago: inv.paymentMethod === "Efectivo" ? "01" : "20",
     };
+
+    if (isNC) {
+      const cleanId = String(inv.sriAuth?.secuencial || inv.id).replace(/\D/g, "");
+      const activeSeq = cleanId.slice(-9).padStart(9, "0");
+      sriData.facturaModificada = {
+        numero: `001-001-${activeSeq}`,
+        fecha: new Date(inv.date).toLocaleDateString("es-EC")
+      };
+    }
+
     try {
-      const doc = createPDFDoc(inv, sriData, inv.sriAuth);
-      doc.save(`Factura_${inv.id}.pdf`);
+      const doc = createPDFDoc(inv, sriData, isNC ? inv.sriAuth.creditNote : inv.sriAuth);
+      const filename = isNC ? `NotaCredito_${inv.id}.pdf` : `Factura_${inv.id}.pdf`;
+      doc.save(filename);
       showAlert(`RIDE descargado exitosamente.`, "Éxito", "success");
     } catch (e) {
       console.error(e);
@@ -380,26 +505,40 @@ export default function BillingDashboard({
 
   const downloadXML = (inv: Order) => {
     try {
-      if (inv.sriAuth?.autorizacionXML) {
-        const blob = new Blob([inv.sriAuth.autorizacionXML], { type: "application/xml;charset=utf-8" });
-        saveAs(blob, `autorizacion_${inv.id}.xml`);
-        showAlert(`XML original de autorización descargado`, "Éxito", "success");
+      const isNC = inv.status === "anulada" && inv.sriAuth?.creditNote;
+      const targetAuth = isNC ? inv.sriAuth.creditNote : inv.sriAuth;
+
+      if (targetAuth?.autorizacionXML) {
+        let xmlToDownload = targetAuth.autorizacionXML;
+        let filename = isNC ? `nota_credito_autorizacion_${inv.id}.xml` : `autorizacion_${inv.id}.xml`;
+        const authMatch = targetAuth.autorizacionXML.match(/<autorizacion>([\s\S]*?)<\/autorizacion>/);
+        if (authMatch) {
+          xmlToDownload = `<?xml version="1.0" encoding="UTF-8"?>\n<autorizacion>${authMatch[1]}</autorizacion>`;
+        }
+        const blob = new Blob([xmlToDownload], { type: "application/xml;charset=utf-8" });
+        saveAs(blob, filename);
+        showAlert(`XML de autorización descargado`, "Éxito", "success");
         return;
       }
+      
+      // Si no tiene XML de autorización, generamos y descargamos el XML sin firmar correspondiente
+      const isNota = inv.documentType === "nota";
+      
+      const dSustento = new Date(inv.date);
+      const formattedFechaSustento = `${dSustento.getDate().toString().padStart(2, "0")}/${(dSustento.getMonth() + 1).toString().padStart(2, "0")}/${dSustento.getFullYear()}`;
+
+      const cleanId = String(inv.sriAuth?.secuencial || inv.id).replace(/\D/g, "");
+      const activeSequential = cleanId.slice(-9).padStart(9, "0");
 
       const sriData: SRIInvoiceData = {
         rucEmisor: "1714809025001",
         razonSocialEmisor: "ACHI LOPEZ JOSUE ANDRES",
         nombreComercialEmisor: "CEVICHERIA SALYMAR",
         dirMatriz: "PICHINCHA / QUITO / CHILIBULO / LA MAGDALENA ALTA S10 PURUHA OE6-203 Y OE6A HUALCOPO",
-        estab: inv.id.includes("-") ? inv.id.split("-")[0] : "001",
-        ptoEmi: inv.id.includes("-") ? inv.id.split("-")[1] : "001",
-        secuencial: inv.id.includes("-") ? inv.id.split("-")[2] : inv.id.replace("#", "").padStart(9, "0"),
-        fechaEmision: new Date(inv.date).toLocaleDateString("es-EC", {
-          day: "2-digit",
-          month: "2-digit",
-          year: "numeric"
-        }),
+        estab: "001",
+        ptoEmi: "001",
+        secuencial: isNC ? (inv.sriAuth?.creditNote?.secuencial || "000000001") : activeSequential,
+        fechaEmision: formattedFechaSustento,
         cliente: {
           razonSocial: inv.businessName || inv.customerName || "CONSUMIDOR FINAL",
           identificacion: inv.ruc || inv.clientId || "9999999999999",
@@ -410,20 +549,91 @@ export default function BillingDashboard({
           codigo: item.menuItem.id,
           descripcion: item.menuItem.name,
           cantidad: item.quantity,
-          precioUnitario: item.menuItem.price,
+          precioUnitario: isNota ? item.menuItem.price : item.menuItem.price / 1.15,
           descuento: 0
         })),
         formaPago: inv.paymentMethod === "Efectivo" ? "01" : "20",
       };
-      
-      const xml = generateInvoiceXML(sriData);
-      const claveAcceso = generateAccessKey({ ...sriData, fechaEmision: sriData.fechaEmision }, "01");
-      const blob = new Blob([xml], { type: "application/xml;charset=utf-8" });
-      saveAs(blob, `factura_${claveAcceso}.xml`);
-      showAlert(`XML generado con clave de acceso: ${claveAcceso}`, "XML Descargado", "success");
-    } catch (error) {
+
+      let xmlString = "";
+      let filename = "";
+
+      if (isNC) {
+        sriData.facturaModificada = {
+          numero: `001-001-${activeSequential}`,
+          fecha: formattedFechaSustento
+        };
+        xmlString = generateCreditNoteXML(sriData);
+        filename = `nota_credito_sin_firmar_${inv.id}.xml`;
+      } else if (isNota) {
+        xmlString = generateNotaVentaXML(sriData);
+        filename = `nota_venta_sin_firmar_${inv.id}.xml`;
+      } else {
+        xmlString = generateInvoiceXML(sriData);
+        filename = `factura_sin_firmar_${inv.id}.xml`;
+      }
+
+      const blob = new Blob([xmlString], { type: "application/xml;charset=utf-8" });
+      saveAs(blob, filename);
+      showAlert(`XML sin firmar descargado (modo borrador/pruebas)`, "Éxito", "success");
+    } catch (error: any) {
       console.error(error);
-      showAlert("Error al generar el XML.", "Error", "error");
+      showAlert("Error al descargar el XML: " + error.message, "Error", "error");
+    }
+  };
+
+  const downloadUnsignedCreditNoteXML = (inv: Order) => {
+    try {
+      const dSustento = new Date(inv.date);
+      const formattedFechaSustento = `${dSustento.getDate().toString().padStart(2, "0")}/${(dSustento.getMonth() + 1).toString().padStart(2, "0")}/${dSustento.getFullYear()}`;
+      
+      const today = new Date();
+      const formattedFechaNC = `${today.getDate().toString().padStart(2, "0")}/${(today.getMonth() + 1).toString().padStart(2, "0")}/${today.getFullYear()}`;
+
+      const cleanId = String(inv.sriAuth?.secuencial || inv.id).replace(/\D/g, "");
+      const activeSequential = cleanId.slice(-9).padStart(9, "0");
+
+      const ncCount = salesNotes.filter(n => n.sriAuth?.creditNote).length + 1;
+      const ncSecuencial = ncCount.toString().padStart(9, "0");
+
+      const sriData: SRIInvoiceData = {
+        rucEmisor: "1714809025001",
+        razonSocialEmisor: "ACHI LOPEZ JOSUE ANDRES",
+        nombreComercialEmisor: "CEVICHERIA SALYMAR",
+        dirMatriz: "PICHINCHA / QUITO / CHILIBULO / LA MAGDALENA ALTA S10 PURUHA OE6-203 Y OE6A HUALCOPO",
+        estab: "001",
+        ptoEmi: "001",
+        secuencial: ncSecuencial,
+        fechaEmision: formattedFechaNC,
+        cliente: {
+          razonSocial: inv.businessName || inv.customerName || "CONSUMIDOR FINAL",
+          identificacion: inv.ruc || inv.clientId || "9999999999999",
+          direccion: inv.clientAddress || undefined,
+          email: inv.clientEmail || undefined
+        },
+        items: inv.items.map(item => ({
+          codigo: item.menuItem.id,
+          descripcion: item.menuItem.name,
+          cantidad: item.quantity,
+          precioUnitario: item.menuItem.price / 1.15,
+          descuento: 0
+        })),
+        formaPago: inv.paymentMethod === "Efectivo" ? "01" : "20",
+        facturaModificada: {
+          numero: `001-001-${activeSequential}`,
+          fecha: formattedFechaSustento
+        }
+      };
+
+      const xmlString = generateCreditNoteXML(sriData);
+      const filename = `nota_credito_sin_firmar_${inv.id}.xml`;
+
+      const blob = new Blob([xmlString], { type: "application/xml;charset=utf-8" });
+      saveAs(blob, filename);
+      showAlert(`XML de Nota de Crédito sin firmar descargado (borrador)`, "Éxito", "success");
+    } catch (error: any) {
+      console.error(error);
+      showAlert("Error al generar XML de Nota de Crédito: " + error.message, "Error", "error");
     }
   };
 
@@ -442,20 +652,7 @@ export default function BillingDashboard({
           <Receipt className="w-6 h-6 text-blue-600" />
           Facturación y Cobros
         </h2>
-        {view === "list" ? (
-          <button
-            onClick={() => {
-              if (onClearInitialOrder) onClearInitialOrder();
-              setItems([]);
-              setClientForm({ clientId: "", documentId: "", businessName: "", phone: "", email: "", address: "" });
-              setTransactionNumber("");
-              setView("create");
-            }}
-            className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-xl text-sm flex items-center gap-2 shadow-sm shadow-blue-200 transition-colors"
-          >
-            <Plus className="w-4 h-4" /> Nueva Factura
-          </button>
-        ) : (
+        {view === "create" && (
           <button
             onClick={() => {
               if (onClearInitialOrder) onClearInitialOrder();
@@ -558,6 +755,15 @@ export default function BillingDashboard({
                         <button onClick={() => downloadPdf(inv)} className="p-1.5 bg-slate-100 text-slate-600 hover:bg-indigo-100 hover:text-indigo-600 rounded-md transition-colors" title="Descargar PDF">
                           <Download className="w-4 h-4" />
                         </button>
+                        {inv.status !== "anulada" && inv.documentType === "factura" && (
+                          <button 
+                            onClick={() => downloadUnsignedCreditNoteXML(inv)} 
+                            className="p-1.5 bg-slate-100 text-amber-600 hover:bg-amber-100 hover:text-amber-700 rounded-md transition-colors" 
+                            title="Descargar XML Nota de Crédito sin firmar (Anulación)"
+                          >
+                            <FileCode className="w-4 h-4 text-amber-600" />
+                          </button>
+                        )}
                         {inv.status !== "anulada" && (
                           <button onClick={() => setInvoiceToAnular(inv.id)} className="p-1.5 bg-slate-100 text-slate-600 hover:bg-red-100 hover:text-red-600 rounded-md transition-colors" title="Anular">
                             <Trash2 className="w-4 h-4" />
@@ -1045,18 +1251,9 @@ export default function BillingDashboard({
               <p className="text-slate-500 text-sm mb-4">
                 ¿Seguro que deseas anular la factura <strong>{invoiceToAnular}</strong>?
               </p>
-              <div className="mb-6">
-                <label className="block text-sm font-bold text-slate-700 mb-2">Motivo</label>
-                <textarea
-                  value={cancelReason}
-                  onChange={(e) => setCancelReason(e.target.value)}
-                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-red-500 outline-none"
-                  rows={3}
-                />
-              </div>
-              <div className="flex gap-3">
+              <div className="flex gap-3 mt-4">
                 <button onClick={() => setInvoiceToAnular(null)} className="flex-1 py-3 bg-slate-100 hover:bg-slate-200 rounded-xl font-bold text-sm">Cancelar</button>
-                <button onClick={handleAnular} disabled={!cancelReason} className="flex-1 py-3 bg-red-600 hover:bg-red-700 text-white rounded-xl font-bold text-sm disabled:opacity-50">Confirmar</button>
+                <button onClick={handleAnular} className="flex-1 py-3 bg-red-600 hover:bg-red-700 text-white rounded-xl font-bold text-sm">Confirmar</button>
               </div>
             </motion.div>
           </div>

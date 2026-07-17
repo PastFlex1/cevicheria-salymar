@@ -20,8 +20,10 @@ export const RideTemplate = forwardRef<HTMLDivElement, RideTemplateProps>(
       formattedDate = `${day}/${month}/${year}`;
     } catch (e) {}
 
-    const authDate = new Date(order.date);
-    const authDateStr = `${authDate.toLocaleDateString('es-EC')} ${authDate.toLocaleTimeString('es-EC')}`;
+    const authDate = order.sriAuth?.authDate ? new Date(order.sriAuth.authDate) : new Date(order.date);
+    const authDateStr = isNaN(authDate.getTime()) 
+      ? (order.sriAuth?.authDate || sriData.fechaEmision)
+      : `${authDate.toLocaleDateString('es-EC')} ${authDate.toLocaleTimeString('es-EC')}`;
     
     // Recalculate Subtotal
     const subtotalCalc = sriData.items.reduce((acc, item) => acc + (item.cantidad * item.precioUnitario), 0);

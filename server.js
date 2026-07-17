@@ -33,6 +33,11 @@ tables.forEach(table => {
         if (row.payments) row.payments = JSON.parse(row.payments);
         if (row.ingredients) row.ingredients = JSON.parse(row.ingredients);
         if (row.recipe) row.recipe = JSON.parse(row.recipe);
+        if (row.sriAuth) {
+          try {
+            row.sriAuth = JSON.parse(row.sriAuth);
+          } catch (e) {}
+        }
         return row;
       });
       res.json(parsedRows);
@@ -49,6 +54,11 @@ tables.forEach(table => {
         if (row.payments) row.payments = JSON.parse(row.payments);
         if (row.ingredients) row.ingredients = JSON.parse(row.ingredients);
         if (row.recipe) row.recipe = JSON.parse(row.recipe);
+        if (row.sriAuth) {
+          try {
+            row.sriAuth = JSON.parse(row.sriAuth);
+          } catch (e) {}
+        }
         res.json(row);
       } else {
         res.json(null);
@@ -97,6 +107,36 @@ tables.forEach(table => {
     }
   });
 });
+
+app.post('/api/reset-database', async (req, res) => {
+  try {
+    const tablesToClear = [
+      'salesNotes',
+      'expenses',
+      'cashSessions',
+      'cashClosings',
+      'customers'
+    ];
+    for (const table of tablesToClear) {
+      await run(`DELETE FROM ${table}`);
+    }
+    if (req.query.all === 'true') {
+      const configTables = [
+        'menuCategories', 'menuProducts', 'inventoryItems', 
+        'inventoryComidas', 'inventoryBebidas', 'inventoryCombos', 'providers'
+      ];
+      for (const table of configTables) {
+        await run(`DELETE FROM ${table}`);
+      }
+    }
+    console.log("Database cleared successfully.");
+    res.json({ success: true, message: "Base de datos limpiada con éxito." });
+  } catch (error) {
+    console.error("Error clearing database:", error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
 
 app.post('/api/sri/procesar', async (req, res) => {
   try {
