@@ -211,7 +211,7 @@ export function generateCreditNoteXML(data: SRIInvoiceData): string {
   });
 
   const subtotal = (data.items || []).reduce(
-    (acc, i) => acc + (safe(i.cantidad) * safe(i.precioUnitario)),
+    (acc, i) => acc + (safe(i.cantidad) * Number(safe(i.precioUnitario).toFixed(2))),
     0
   );
 
@@ -271,7 +271,8 @@ export function generateCreditNoteXML(data: SRIInvoiceData): string {
 
   xmlStr += `    <detalles>\n`;
   (data.items || []).forEach((item) => {
-    const base = safe(item.cantidad) * safe(item.precioUnitario);
+    const priceUnit = Number(safe(item.precioUnitario).toFixed(2));
+    const base = safe(item.cantidad) * priceUnit;
     const itemIVA = base * 0.15;
     xmlStr += `        <detalle>\n`;
     xmlStr += `            <descripcion>${escapeXml(item.descripcion.toUpperCase())}</descripcion>\n`;
