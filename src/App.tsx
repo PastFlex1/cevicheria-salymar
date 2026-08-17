@@ -202,6 +202,10 @@ export default function App() {
   >("Materia Prima");
   const [inventoryPage, setInventoryPage] = useState(1);
   const inventoryItemsPerPage = 10;
+  const [salesNotesPage, setSalesNotesPage] = useState(1);
+  const [providersPage, setProvidersPage] = useState(1);
+  const [expensesPage, setExpensesPage] = useState(1);
+  const itemsPerPage = 10;
   const [inventoryItems, setInventoryItemsState] = useState<InventoryItem[]>([]);
   const [inventoryComidas, setInventoryComidasState] = useState<ComidaItem[]>([]);
   const [inventoryBebidas, setInventoryBebidasState] = useState<InventoryItem[]>([]);
@@ -841,6 +845,7 @@ export default function App() {
 
   const handleCheckout = () => {
     if (cartItems.length === 0) return;
+    setValidationError(null);
     setCheckoutForm({
       documentId: "",
       businessName: "",
@@ -856,14 +861,15 @@ export default function App() {
 
   const handleOpenSession = async (openingBalance: number) => {
     try {
-      const sessionId = "SESS-" + Date.now();
-      await api.updateDoc("cashSessions", "active", {
-        id: sessionId,
-        status: "open",
+      const sessionData = {
+        id: "active",
+        status: "open" as const,
         openedBy: "Administrador",
         openTime: new Date().toISOString(),
         openingBalance,
-      });
+      };
+      await api.updateDoc("cashSessions", "active", sessionData);
+      setActiveSessionState(sessionData);
       showAlert("Caja abierta con éxito.", "Apertura de Caja", "success");
     } catch (e: any) {
       showAlert("Error al abrir caja: " + e.message, "Error", "error");
@@ -903,6 +909,9 @@ export default function App() {
 
       await api.updateDoc("cashClosings", closingId, closingReport);
       await api.deleteDoc("cashSessions", "active");
+
+      setActiveSessionState(null);
+      setCashClosingsState(prev => [closingReport, ...prev]);
 
       setPreviewClosingReport({
         ...closingReport,
@@ -1353,7 +1362,6 @@ export default function App() {
     setOrderToDelete(null);
   };
 
-
   const saveOrder = (status: OrderStatus = "pendiente") => {
     if (cartItems.length === 0) return;
 
@@ -1505,13 +1513,15 @@ export default function App() {
       
       let finalOrderId = editingOrderId;
       if (!finalOrderId) {
-        const currentMaxId = salesNotes.reduce((max, note) => {
-          const parts = note.id.split('-');
-          const lastPart = parts[parts.length - 1];
-          const numId = parseInt(lastPart.replace(/\D/g, ""), 10);
-          return !isNaN(numId) && numId > max ? numId : max;
-        }, 0);
-        finalOrderId = `001-001-${(currentMaxId + 1).toString().padStart(9, "0")}`;
+        const currentMaxId = salesNotes
+          .filter(n => n.documentType === "factura")
+          .reduce((max, note) => {
+            const parts = note.id.split('-');
+            const lastPart = parts[parts.length - 1];
+            const numId = parseInt(lastPart.replace(/\D/g, ""), 10);
+            return !isNaN(numId) && numId > max ? numId : max;
+          }, 0);
+        finalOrderId = `F-001-001-${(currentMaxId + 1).toString().padStart(9, "0")}`;
       }
 
       const itemsToBill = cartItems.length > 0 ? cartItems : [];
@@ -1651,17 +1661,21 @@ export default function App() {
           processedOrder = updatedOrder;
       }
     } else {
-      const currentMaxId = salesNotes.reduce((max, note) => {
-        const parts = note.id.split('-');
-        const lastPart = parts[parts.length - 1];
-        const numId = parseInt(lastPart.replace(/\D/g, ""), 10);
-        return !isNaN(numId) && numId > max ? numId : max;
-      }, 0);
+      const isFactura = documentType === "factura";
+      const currentMaxId = salesNotes
+        .filter(n => isFactura ? n.documentType === "factura" : n.documentType !== "factura")
+        .reduce((max, note) => {
+          const parts = note.id.split('-');
+          const lastPart = parts[parts.length - 1];
+          const numId = parseInt(lastPart.replace(/\D/g, ""), 10);
+          return !isNaN(numId) && numId > max ? numId : max;
+        }, 0);
       const nextIdNum = currentMaxId + 1;
       const nextIdStr = nextIdNum.toString().padStart(9, "0");
+      const prefix = isFactura ? "F-" : "N-";
 
       const newOrder: Order = {
-        id: `001-001-${nextIdStr}`,
+        id: `${prefix}001-001-${nextIdStr}`,
         items: [...cartItems],
         subtotal,
         tax,
@@ -1935,6 +1949,36 @@ export default function App() {
     setInventoryPage(1);
   }, [inventoryTab]);
 
+  const filteredSalesNotesForTab = useMemo(() => {
+    return salesNotes.filter(
+      (n) => n.documentType === "nota" || !n.documentType
+    );
+  }, [salesNotes]);
+
+  const totalSalesNotesPages = Math.ceil(filteredSalesNotesForTab.length / itemsPerPage);
+  const paginatedSalesNotes = useMemo(() => {
+    return filteredSalesNotesForTab.slice(
+      (salesNotesPage - 1) * itemsPerPage,
+      salesNotesPage * itemsPerPage
+    );
+  }, [filteredSalesNotesForTab, salesNotesPage, itemsPerPage]);
+
+  const totalProvidersPages = Math.ceil(providers.length / itemsPerPage);
+  const paginatedProviders = useMemo(() => {
+    return providers.slice(
+      (providersPage - 1) * itemsPerPage,
+      providersPage * itemsPerPage
+    );
+  }, [providers, providersPage, itemsPerPage]);
+
+  const totalExpensesPages = Math.ceil(expenses.length / itemsPerPage);
+  const paginatedExpenses = useMemo(() => {
+    return expenses.slice(
+      (expensesPage - 1) * itemsPerPage,
+      expensesPage * itemsPerPage
+    );
+  }, [expenses, expensesPage, itemsPerPage]);
+
   if (isLoading) {
     return (
       <div className="min-h-screen bg-[#f4f7fe] flex flex-col items-center justify-center font-sans">
@@ -2024,15 +2068,6 @@ export default function App() {
               </button>
             ))}
           </nav>
-          
-          <button
-            onClick={handleClearTestData}
-            className="flex items-center gap-1.5 text-[11px] xl:text-xs font-bold py-2 px-3 rounded-xl bg-red-50 text-red-600 hover:bg-red-100 transition-colors whitespace-nowrap mt-1 cursor-pointer"
-            title="Limpiar Datos de Prueba"
-          >
-            <Trash2 className="w-4 h-4" />
-            <span className="hidden sm:inline">Limpiar Datos</span>
-          </button>
         </header>
 
         {/* Main Body */}
@@ -2208,12 +2243,9 @@ export default function App() {
                     </p>
                   </div>
                 ) : (
-                  <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
-                    {salesNotes
-                      .filter(
-                        (n) => n.documentType === "nota" || !n.documentType,
-                      )
-                      .map((note) => (
+                  <div className="flex flex-col gap-6">
+                    <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
+                      {paginatedSalesNotes.map((note) => (
                         <div
                           key={note.id}
                           onClick={() => setPreviewOrder(note)}
@@ -2223,7 +2255,7 @@ export default function App() {
                           <div
                             className={`absolute top-4 right-[-30px] text-white text-[10px] font-bold py-1 px-8 rotate-45 text-center shadow-sm ${note.status === "anulada" ? "bg-red-500" : "bg-emerald-500"}`}
                           >
-                            {note.status === "anulada" ? "ANULADA" : "PAGADO"}
+                            {note.status === "anulada" ? "ANULADA" : "AUTORIZADA"}
                           </div>
 
                           <div className="flex justify-between items-start mb-4">
@@ -2310,6 +2342,14 @@ export default function App() {
                           </div>
                         </div>
                       ))}
+                    </div>
+                    {totalSalesNotesPages > 1 && (
+                      <Pagination
+                        currentPage={salesNotesPage}
+                        totalPages={totalSalesNotesPages}
+                        onPageChange={setSalesNotesPage}
+                      />
+                    )}
                   </div>
                 )}
               </div>
@@ -2328,6 +2368,10 @@ export default function App() {
                 salesNotes={salesNotes}
                 onPrint={(note) => setPreviewOrder(note)}
                 updateOrder={(updated) => {
+                  const original = salesNotes.find(o => o.id === updated.id);
+                  if (original && original.status !== "anulada" && updated.status === "anulada") {
+                    updateInventory(updated.items, true);
+                  }
                   setSalesNotes(prev => prev.map(o => o.id === updated.id ? updated : o));
                 }}
                 addInvoice={(invoice) => {
@@ -2549,87 +2593,96 @@ export default function App() {
                   </button>
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
-                  {providers.map((provider) => (
-                    <div
-                      key={provider.id}
-                      className="bg-white border border-slate-100 rounded-2xl shadow-sm p-6 flex flex-col hover:shadow-md transition-shadow relative"
-                    >
-                      <div className="absolute top-4 right-4 flex gap-1">
-                        <button
-                          onClick={() => handleEditProvider(provider)}
-                          className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
-                          title="Editar Proveedor"
-                        >
-                          <Pencil className="w-4 h-4" />
-                        </button>
-                        <button
-                          onClick={() => handleDeleteProvider(provider.id)}
-                          className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
-                          title="Eliminar Proveedor"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
-                      </div>
-                      <div className="flex items-start gap-4 mb-4">
-                        <div className="w-12 h-12 rounded-xl bg-blue-50 flex items-center justify-center shrink-0">
-                          <Store className="w-6 h-6 text-blue-600" />
+                <div className="flex flex-col gap-6">
+                  <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
+                    {paginatedProviders.map((provider) => (
+                      <div
+                        key={provider.id}
+                        className="bg-white border border-slate-100 rounded-2xl shadow-sm p-6 flex flex-col hover:shadow-md transition-shadow relative"
+                      >
+                        <div className="absolute top-4 right-4 flex gap-1">
+                          <button
+                            onClick={() => handleEditProvider(provider)}
+                            className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                            title="Editar Proveedor"
+                          >
+                            <Pencil className="w-4 h-4" />
+                          </button>
+                          <button
+                            onClick={() => handleDeleteProvider(provider.id)}
+                            className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                            title="Eliminar Proveedor"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
                         </div>
-                        <div>
-                          <h4 className="font-bold text-lg text-slate-800 leading-tight">
-                            {provider.name}
-                          </h4>
-                          <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
-                            {provider.category}
-                          </span>
-                        </div>
-                      </div>
-
-                      <div className="space-y-3 mt-2 flex-1">
-                        <div className="flex items-center gap-3 text-sm">
-                          <div className="w-8 h-8 rounded-full bg-slate-50 flex items-center justify-center shrink-0">
-                            <User className="w-4 h-4 text-slate-500" />
+                        <div className="flex items-start gap-4 mb-4">
+                          <div className="w-12 h-12 rounded-xl bg-blue-50 flex items-center justify-center shrink-0">
+                            <Store className="w-6 h-6 text-blue-600" />
                           </div>
-                          <div className="flex flex-col">
-                            <span className="text-[10px] font-bold text-slate-400 uppercase">
-                              Contacto
-                            </span>
-                            <span className="font-medium text-slate-700">
-                              {provider.contactName}
+                          <div>
+                            <h4 className="font-bold text-lg text-slate-800 leading-tight">
+                              {provider.name}
+                            </h4>
+                            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                              {provider.category}
                             </span>
                           </div>
                         </div>
 
-                        <div className="flex items-center gap-3 text-sm">
-                          <div className="w-8 h-8 rounded-full bg-slate-50 flex items-center justify-center shrink-0">
-                            <Phone className="w-4 h-4 text-slate-500" />
+                        <div className="space-y-3 mt-2 flex-1">
+                          <div className="flex items-center gap-3 text-sm">
+                            <div className="w-8 h-8 rounded-full bg-slate-50 flex items-center justify-center shrink-0">
+                              <User className="w-4 h-4 text-slate-500" />
+                            </div>
+                            <div className="flex flex-col">
+                              <span className="text-[10px] font-bold text-slate-400 uppercase">
+                                Contacto
+                              </span>
+                              <span className="font-medium text-slate-700">
+                                {provider.contactName}
+                              </span>
+                            </div>
                           </div>
-                          <div className="flex flex-col">
-                            <span className="text-[10px] font-bold text-slate-400 uppercase">
-                              Teléfono
-                            </span>
-                            <span className="font-medium text-slate-700">
-                              {provider.phone}
-                            </span>
-                          </div>
-                        </div>
 
-                        <div className="flex items-center gap-3 text-sm">
-                          <div className="w-8 h-8 rounded-full bg-slate-50 flex items-center justify-center shrink-0">
-                            <MapPin className="w-4 h-4 text-slate-500" />
+                          <div className="flex items-center gap-3 text-sm">
+                            <div className="w-8 h-8 rounded-full bg-slate-50 flex items-center justify-center shrink-0">
+                              <Phone className="w-4 h-4 text-slate-500" />
+                            </div>
+                            <div className="flex flex-col">
+                              <span className="text-[10px] font-bold text-slate-400 uppercase">
+                                Teléfono
+                              </span>
+                              <span className="font-medium text-slate-700">
+                                {provider.phone}
+                              </span>
+                            </div>
                           </div>
-                          <div className="flex flex-col">
-                            <span className="text-[10px] font-bold text-slate-400 uppercase">
-                              Dirección
-                            </span>
-                            <span className="font-medium text-slate-700">
-                              {provider.address}
-                            </span>
+
+                          <div className="flex items-center gap-3 text-sm">
+                            <div className="w-8 h-8 rounded-full bg-slate-50 flex items-center justify-center shrink-0">
+                              <MapPin className="w-4 h-4 text-slate-500" />
+                            </div>
+                            <div className="flex flex-col">
+                              <span className="text-[10px] font-bold text-slate-400 uppercase">
+                                Dirección
+                              </span>
+                              <span className="font-medium text-slate-700">
+                                {provider.address}
+                              </span>
+                            </div>
                           </div>
                         </div>
                       </div>
-                    </div>
-                  ))}
+                    ))}
+                  </div>
+                  {totalProvidersPages > 1 && (
+                    <Pagination
+                      currentPage={providersPage}
+                      totalPages={totalProvidersPages}
+                      onPageChange={setProvidersPage}
+                    />
+                  )}
                 </div>
               </div>
             ) : activeTab === "Cierre de Caja" ? (
@@ -2673,33 +2726,42 @@ export default function App() {
                     </p>
                   </div>
                 ) : (
-                  <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
-                    {expenses.map((expense) => (
-                      <div
-                        key={expense.id}
-                        className="bg-white border border-slate-100 rounded-2xl shadow-sm p-6 flex flex-col hover:shadow-md transition-shadow relative"
-                      >
-                        <div className="flex justify-between items-start mb-4">
-                          <div>
-                            <span className="text-[10px] font-bold text-blue-600 bg-blue-50 px-2 py-1 rounded-full uppercase tracking-wider mb-2 inline-block">
-                              {expense.category}
+                  <div className="flex flex-col gap-6">
+                    <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
+                      {paginatedExpenses.map((expense) => (
+                        <div
+                          key={expense.id}
+                          className="bg-white border border-slate-100 rounded-2xl shadow-sm p-6 flex flex-col hover:shadow-md transition-shadow relative"
+                        >
+                          <div className="flex justify-between items-start mb-4">
+                            <div>
+                              <span className="text-[10px] font-bold text-blue-600 bg-blue-50 px-2 py-1 rounded-full uppercase tracking-wider mb-2 inline-block">
+                                {expense.category}
+                              </span>
+                              <h4 className="font-bold text-lg text-slate-800 leading-tight">
+                                {expense.description}
+                              </h4>
+                            </div>
+                          </div>
+
+                          <div className="mt-auto pt-4 border-t border-slate-100 flex justify-between items-end">
+                            <p className="text-xs text-slate-400 font-medium">
+                              {new Date(expense.date).toLocaleString("es-PE")}
+                            </p>
+                            <span className="text-xl font-black text-slate-800">
+                              {formatCurrency(expense.amount)}
                             </span>
-                            <h4 className="font-bold text-lg text-slate-800 leading-tight">
-                              {expense.description}
-                            </h4>
                           </div>
                         </div>
-
-                        <div className="mt-auto pt-4 border-t border-slate-100 flex justify-between items-end">
-                          <p className="text-xs text-slate-400 font-medium">
-                            {new Date(expense.date).toLocaleString("es-PE")}
-                          </p>
-                          <span className="text-xl font-black text-slate-800">
-                            {formatCurrency(expense.amount)}
-                          </span>
-                        </div>
-                      </div>
-                    ))}
+                      ))}
+                    </div>
+                    {totalExpensesPages > 1 && (
+                      <Pagination
+                        currentPage={expensesPage}
+                        totalPages={totalExpensesPages}
+                        onPageChange={setExpensesPage}
+                      />
+                    )}
                   </div>
                 )}
               </div>
@@ -2718,11 +2780,11 @@ export default function App() {
           </div>
 
           {activeTab === "Dashboard" && (
-            <div className="w-[380px] bg-slate-50/30 border-l border-slate-100 flex flex-col shrink-0">
-              <div className="p-6 flex-1 flex flex-col overflow-y-auto">
+            <div className="w-[380px] bg-slate-50/30 border-l border-slate-100 flex flex-col shrink-0 h-full overflow-hidden">
+              <div className="p-6 flex-1 flex flex-col min-h-0">
                 {/* Table Information */}
-                <div className="mb-6 shrink-0">
-                  <h3 className="font-bold text-lg mb-4 text-slate-800">
+                <div className="mb-4 shrink-0">
+                  <h3 className="font-bold text-lg mb-3 text-slate-800">
                     Detalles Generales
                   </h3>
                   <div className="flex gap-2 mb-3">
@@ -2748,10 +2810,10 @@ export default function App() {
                 </div>
 
                 {/* Order Details */}
-                <h3 className="font-bold text-lg mb-4 text-slate-800 shrink-0">
+                <h3 className="font-bold text-lg mb-3 text-slate-800 shrink-0">
                   Detalles del Pedido
                 </h3>
-                <div className="flex-1 space-y-5 pr-2 mb-6 shrink-0 min-h-[150px]">
+                <div className="flex-1 min-h-0 overflow-y-auto space-y-4 pr-1 mb-4">
                   <AnimatePresence initial={false}>
                     {cartItems.map((item) => {
                       const dynamicItem = menuItems.find((m) => m.id === item.menuItem.id);
@@ -2833,11 +2895,11 @@ export default function App() {
                 </div>
 
                 {/* Order Summary */}
-                <div className="pt-6 mt-auto border-t-2 border-dashed border-slate-200 shrink-0">
-                  <h3 className="font-bold text-lg mb-4 text-slate-800">
+                <div className="pt-4 border-t-2 border-dashed border-slate-200 shrink-0">
+                  <h3 className="font-bold text-lg mb-3 text-slate-800">
                     Resumen del Pedido
                   </h3>
-                  <div className="space-y-3 mb-6">
+                  <div className="space-y-2 mb-4">
                     <div className="flex justify-between text-sm">
                       <span className="text-slate-500 font-medium">
                         Subtotal
@@ -2856,7 +2918,7 @@ export default function App() {
                     </div>
                   </div>
 
-                  <div className="border-t-2 border-dashed border-slate-200 pt-4 mb-6">
+                  <div className="border-t-2 border-dashed border-slate-200 pt-3 mb-4">
                     <div className="flex justify-between items-center">
                       <span className="text-sm font-bold text-slate-800">
                         Total
@@ -2870,7 +2932,7 @@ export default function App() {
                   <button
                     onClick={handleCheckout}
                     disabled={cartItems.length === 0}
-                    className={`w-full py-4 rounded-2xl font-bold text-sm transition-all flex items-center justify-center gap-2
+                    className={`w-full py-3.5 rounded-2xl font-bold text-sm transition-all flex items-center justify-center gap-2
                     ${
                       cartItems.length > 0
                         ? "bg-blue-600 text-white shadow-xl shadow-blue-600/20 hover:bg-blue-700 active:scale-[0.98]"
@@ -2927,6 +2989,22 @@ export default function App() {
                     </button>
                   </div>
                 </div>
+
+                {validationError && (
+                  <div className="mb-6 p-4 bg-amber-50 border border-amber-200 text-amber-800 rounded-2xl text-xs font-semibold flex items-center justify-between shadow-sm animate-fadeIn">
+                    <div className="flex items-center gap-2">
+                      <span className="text-amber-600 font-bold text-sm">⚠️</span>
+                      <span>{validationError}</span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setValidationError(null)}
+                      className="text-amber-500 hover:text-amber-700 p-1"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
+                )}
 
                 {showCheckoutCustomerSearch && (
                   <div className="mb-6 p-4 bg-blue-50 rounded-2xl border border-blue-100 relative">
@@ -3136,7 +3214,11 @@ export default function App() {
                             documentId: "9999999999999",
                             businessName: "Consumidor Final",
                           });
-                          setDocumentType("nota");
+                          if (documentType === "factura" && total > 50) {
+                            setValidationError("Atención: Según normas del SRI, las facturas mayores a USD 50.00 a Consumidor Final requieren identificación del comprador.");
+                          } else {
+                            setValidationError(null);
+                          }
                         }}
                         className="px-4 py-3 shrink-0 bg-slate-100 text-slate-700 rounded-xl text-xs font-bold hover:bg-slate-200 transition-colors flex items-center gap-2"
                       >
@@ -4080,26 +4162,40 @@ export default function App() {
               initial={{ opacity: 0, scale: 0.95, y: 10 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.95, y: 10 }}
-              className="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden flex flex-col relative"
+              className="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden flex flex-col relative max-h-[90vh] my-auto"
             >
-              <div className="p-6">
-                <button
-                  onClick={() => setPreviewOrder(null)}
-                  className="absolute top-4 right-4 w-8 h-8 flex items-center justify-center rounded-full bg-slate-100 text-slate-500 hover:bg-slate-200 transition-colors"
-                >
-                  <X className="w-4 h-4" />
-                </button>
+              <button
+                onClick={() => setPreviewOrder(null)}
+                className="absolute top-4 right-4 w-8 h-8 flex items-center justify-center rounded-full bg-slate-100 text-slate-500 hover:bg-slate-200 transition-colors z-20"
+              >
+                <X className="w-4 h-4" />
+              </button>
+              <div className="p-6 overflow-y-auto flex-1 scrollbar-thin">
                 <div id="ticket-print-area">
+                  <div className="text-center mb-4 pb-3 border-b border-dashed border-slate-200">
+                    <h2 className="font-extrabold text-base text-slate-800 uppercase tracking-tight">
+                      Cevichería SalyMar
+                    </h2>
+                    <p className="text-slate-600 text-xs font-medium">
+                      RUC: 1714809026001
+                    </p>
+                    <p className="text-slate-600 text-xs font-medium">
+                      Dir: Puruhá Oe2 206 y Hualcopo
+                    </p>
+                    <p className="text-slate-600 text-xs font-medium">
+                      Telf: 0984622526
+                    </p>
+                  </div>
                   <div className="text-center mb-6">
-                  <h3 className="font-bold text-lg text-slate-800">
-                    {previewOrder.documentType === "factura"
-                      ? "FACTURA ELECTRÓNICA"
-                      : "NOTA DE VENTA"}
-                  </h3>
-                  <p className="text-slate-500 text-sm">
-                    Comprobante: {previewOrder.id}
-                  </p>
-                </div>
+                    <h3 className="font-bold text-lg text-slate-800">
+                      {previewOrder.documentType === "factura"
+                        ? "FACTURA ELECTRÓNICA"
+                        : "NOTA DE VENTA"}
+                    </h3>
+                    <p className="text-slate-500 text-sm">
+                      Comprobante: {previewOrder.id}
+                    </p>
+                  </div>
                 <div className="space-y-4 text-sm text-slate-600 border-b border-dashed border-slate-200 pb-6 mb-6">
                   {previewOrder.customerName && (
                     <div className="flex justify-between">
@@ -4213,10 +4309,12 @@ export default function App() {
                   </div>
                 </div>
               </div>
+            </div>
 
-              <button
+            <div className="p-4 bg-slate-50 border-t border-slate-100 flex-shrink-0 z-10">
+                <button
                   onClick={() => window.print()}
-                  className="w-full bg-slate-900 text-white font-bold py-3.5 rounded-xl hover:bg-slate-800 transition-colors flex items-center justify-center gap-2"
+                  className="w-full bg-slate-900 text-white font-bold py-3.5 rounded-xl hover:bg-slate-800 transition-colors flex items-center justify-center gap-2 shadow-sm"
                 >
                   <Printer className="w-4 h-4" />
                   Imprimir Comprobante
@@ -4426,16 +4524,30 @@ export default function App() {
               initial={{ opacity: 0, scale: 0.95, y: 10 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.95, y: 10 }}
-              className="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden flex flex-col relative"
+              className="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden flex flex-col relative max-h-[90vh] my-auto"
             >
-              <div className="p-6">
-                <button
-                  onClick={() => setPreviewClosingReport(null)}
-                  className="absolute top-4 right-4 w-8 h-8 flex items-center justify-center rounded-full bg-slate-100 text-slate-500 hover:bg-slate-200 transition-colors"
-                >
-                  <X className="w-4 h-4" />
-                </button>
+              <button
+                onClick={() => setPreviewClosingReport(null)}
+                className="absolute top-4 right-4 w-8 h-8 flex items-center justify-center rounded-full bg-slate-100 text-slate-500 hover:bg-slate-200 transition-colors z-20"
+              >
+                <X className="w-4 h-4" />
+              </button>
+              <div className="p-6 overflow-y-auto flex-1 scrollbar-thin">
                 <div id="cierre-print-area">
+                  <div className="text-center mb-4 pb-3 border-b border-dashed border-slate-200">
+                    <h2 className="font-extrabold text-base text-slate-800 uppercase tracking-tight">
+                      Cevichería SalyMar
+                    </h2>
+                    <p className="text-slate-600 text-xs font-medium">
+                      RUC: 1714809026001
+                    </p>
+                    <p className="text-slate-600 text-xs font-medium">
+                      Dir: Puruhá Oe2 206 y Hualcopo
+                    </p>
+                    <p className="text-slate-600 text-xs font-medium">
+                      Telf: 0984622526
+                    </p>
+                  </div>
                   <div className="text-center mb-6">
                     <h3 className="font-bold text-lg text-slate-800">
                       {previewClosingReport.isClosing ? "REPORTE DE CIERRE" : "REPORTE PARCIAL"}
@@ -4530,21 +4642,21 @@ export default function App() {
                     </div>
                   )}
                 </div>
+              </div>
 
-                <div className="mt-6 flex gap-3">
-                  <button
-                    onClick={() => setPreviewClosingReport(null)}
-                    className="flex-1 py-3 bg-slate-100 text-slate-600 rounded-xl font-bold hover:bg-slate-200 transition-colors text-sm"
-                  >
-                    Cerrar
-                  </button>
-                  <button
-                    onClick={() => window.print()}
-                    className="flex-1 py-3 bg-blue-600 text-white rounded-xl font-bold hover:bg-blue-700 shadow-lg shadow-blue-200 transition-all text-sm flex items-center justify-center gap-1.5"
-                  >
-                    <Printer className="w-4 h-4" /> Imprimir
-                  </button>
-                </div>
+              <div className="p-4 bg-slate-50 border-t border-slate-100 flex-shrink-0 flex gap-3 z-10">
+                <button
+                  onClick={() => setPreviewClosingReport(null)}
+                  className="flex-1 py-3 bg-slate-100 text-slate-600 rounded-xl font-bold hover:bg-slate-200 transition-colors text-sm"
+                >
+                  Cerrar
+                </button>
+                <button
+                  onClick={() => window.print()}
+                  className="flex-1 py-3 bg-blue-600 text-white rounded-xl font-bold hover:bg-blue-700 shadow-lg shadow-blue-200 transition-all text-sm flex items-center justify-center gap-1.5"
+                >
+                  <Printer className="w-4 h-4" /> Imprimir
+                </button>
               </div>
             </motion.div>
           </div>

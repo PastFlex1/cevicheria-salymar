@@ -77,7 +77,7 @@ export function generateAccessKey(data: any, codDoc: string = "01"): string {
   const dateStr = day + month + year;
 
   const ruc = data.rucEmisor.replace(/\D/g, "").padStart(13, "0");
-  const ambiente = "1"; // Ajustado a 1 (PRUEBAS)
+  const ambiente = "2"; // Ajustado a 2 (PRODUCCIÓN)
   const serie = data.estab.padStart(3, "0") + data.ptoEmi.padStart(3, "0");
   const secuencial = data.secuencial.padStart(9, "0");
   const codigoNumerico = data.codigoNumerico || Math.floor(10000000 + Math.random() * 90000000).toString();
@@ -107,7 +107,13 @@ export function generateInvoiceXML(data: SRIInvoiceData): string {
   const valorIVA = totalSinImpuestosCalculado * 0.15;
   const totalFinalConIVA = totalSinImpuestosCalculado + valorIVA;
 
-  const esConsumidorFinal = data.cliente.identificacion === "9999999999999";
+  const isConsumidorName = data.cliente.razonSocial.toUpperCase() === "CONSUMIDOR FINAL" || data.cliente.razonSocial.toUpperCase() === "CLIENTE FINAL";
+  const esConsumidorFinal = data.cliente.identificacion === "9999999999999" || data.cliente.identificacion === "9999999999" || isConsumidorName;
+  
+  if (esConsumidorFinal && totalFinalConIVA > 50) {
+    throw new Error("Las facturas mayores a USD 50 deben identificar al comprador obligatoriamente.");
+  }
+
   let tipoId = "05"; 
   if (esConsumidorFinal) tipoId = "07"; 
   else if (data.cliente.identificacion.length === 13) tipoId = "04"; 
@@ -115,7 +121,7 @@ export function generateInvoiceXML(data: SRIInvoiceData): string {
   let xml = `<?xml version="1.0" encoding="UTF-8"?>\n`;
   xml += `<factura id="comprobante" version="1.1.0">\n\n`;
   xml += `    <infoTributaria>
-        <ambiente>1</ambiente>
+        <ambiente>2</ambiente>
         <tipoEmision>1</tipoEmision>\n`;
   xml += `        <razonSocial>${escapeXml(data.razonSocialEmisor)}</razonSocial>\n`;
   xml += `        <nombreComercial>${escapeXml(data.nombreComercialEmisor || "CEVICHERIA SALYMAR")}</nombreComercial>\n`;
@@ -134,7 +140,9 @@ export function generateInvoiceXML(data: SRIInvoiceData): string {
   xml += `        <tipoIdentificacionComprador>${tipoId}</tipoIdentificacionComprador>\n`;
   xml += `        <razonSocialComprador>${escapeXml(esConsumidorFinal ? "CONSUMIDOR FINAL" : data.cliente.razonSocial.toUpperCase())}</razonSocialComprador>\n`;
   xml += `        <identificacionComprador>${esConsumidorFinal ? "9999999999999" : data.cliente.identificacion}</identificacionComprador>\n`;
-  xml += `        <direccionComprador>${escapeXml(esConsumidorFinal ? "CONSUMIDOR FINAL" : (data.cliente.direccion?.toUpperCase() || "CONSUMIDOR FINAL"))}</direccionComprador>\n`;
+  if (!esConsumidorFinal) {
+    xml += `        <direccionComprador>${escapeXml(data.cliente.direccion?.toUpperCase() || "S/N")}</direccionComprador>\n`;
+  }
   xml += `        <totalSinImpuestos>${totalSinImpuestosCalculado.toFixed(2)}</totalSinImpuestos>\n`;
   xml += `        <totalDescuento>${data.items.reduce((acc, i) => acc + (i.descuento || 0), 0).toFixed(2)}</totalDescuento>\n\n`;
   xml += `        <totalConImpuestos>\n`;
@@ -232,7 +240,7 @@ export function generateCreditNoteXML(data: SRIInvoiceData): string {
   xmlStr += `<notaCredito id="comprobante" version="1.0.0">\n\n`;
 
   xmlStr += `    <infoTributaria>
-        <ambiente>1</ambiente>
+        <ambiente>2</ambiente>
         <tipoEmision>1</tipoEmision>\n`;
   xmlStr += `        <razonSocial>${escapeXml(data.razonSocialEmisor)}</razonSocial>\n`;
   xmlStr += `        <nombreComercial>${escapeXml(data.nombreComercialEmisor || "CEVICHERIA SALYMAR")}</nombreComercial>\n`;
@@ -333,7 +341,7 @@ export function generateNotaVentaXML(data: SRIInvoiceData): string {
   xml += `<notaVenta id="comprobante" version="1.0.0">\n\n`;
 
   xml += `    <infoTributaria>
-        <ambiente>1</ambiente>
+        <ambiente>2</ambiente>
         <tipoEmision>1</tipoEmision>\n`;
   xml += `        <razonSocial>${escapeXml(data.razonSocialEmisor)}</razonSocial>\n`;
   xml += `        <nombreComercial>${escapeXml(data.nombreComercialEmisor || "CEVICHERIA SALYMAR")}</nombreComercial>\n`;

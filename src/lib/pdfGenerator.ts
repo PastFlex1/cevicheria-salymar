@@ -109,8 +109,7 @@ export function createPDFDoc(order: Order, sriData: SRIInvoiceData, sriAuth?: { 
     doc.setFont('helvetica', 'bold');
     doc.text('AMBIENTE:', 110, 76);
     doc.setFont('helvetica', 'normal');
-    const envChar = accessKey.charAt(23);
-    const envLabel = envChar === "2" ? "PRODUCCIÓN" : "PRUEBAS";
+    const envLabel = "PRODUCCIÓN";
     doc.text(envLabel, 150, 76); 
     
     doc.setFont('helvetica', 'bold');

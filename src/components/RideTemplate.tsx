@@ -73,7 +73,7 @@ export const RideTemplate = forwardRef<HTMLDivElement, RideTemplateProps>(
               <p className="self-end">{authDateStr}</p>
               
               <p className="font-bold">AMBIENTE:</p>
-              <p>PRUEBAS</p>
+              <p>PRODUCCIÓN</p>
               
               <p className="font-bold">EMISIÓN:</p>
               <p>NORMAL</p>

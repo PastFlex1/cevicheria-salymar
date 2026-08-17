@@ -6,3 +6,16 @@ coverage/
 *.log
 .env*
 !.env.example
+
+# Build and Electron artifacts
+dist-electron/
+release/
+*.exe
+*.dll
+*.pak
+*.bin
+*.dat
+
+# SQLite temp files
+*.db-wal
+*.db-shm

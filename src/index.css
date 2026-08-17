@@ -29,7 +29,7 @@
   background-color: #94a3b8; /* slate-400 */
 }
 
-/* Print styles for thermal printer (POS-80 or POS-58) */
+/* Print styles for thermal printer (POS-58 / 55mm) */
 @media print {
   /* Set zero margins for the page to avoid browser-added headers/footers */
   @page {
@@ -59,24 +59,39 @@
     visibility: visible !important;
   }
 
-  /* Position the print area at the top-left of the page and let it flow normally */
+  /* Position the print area with 4mm left margin offset for thermal printers.
+     For 55mm/58mm thermal printers, printable width is ~46mm-48mm. */
   #ticket-print-area,
   #cierre-print-area {
     position: absolute !important;
-    left: 0 !important;
+    left: 4mm !important;
     top: 0 !important;
-    width: 100% !important;
-    max-width: 58mm !important; /* POS-58 width requested by user */
+    width: 48mm !important;
+    max-width: 48mm !important;
     margin: 0 !important;
-    padding: 2mm 1mm !important;
+    padding: 1mm 1mm !important;
     box-sizing: border-box !important;
-    font-family: 'Arial', 'Helvetica', 'system-ui', sans-serif !important;
-    font-size: 9.5px !important; /* Adjusted to fit 58mm */
+    font-family: 'Courier New', Courier, monospace, 'Arial', sans-serif !important;
+    font-size: 9.5px !important;
     line-height: 1.2 !important;
-    color: #000 !important;
-    background: #fff !important;
+    color: #000000 !important;
+    font-weight: 800 !important;
+    background: #ffffff !important;
     overflow: visible !important;
     height: auto !important;
+    word-break: break-word !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  /* Force all elements inside ticket print area to be 100% solid black and bold */
+  #ticket-print-area *,
+  #cierre-print-area * {
+    color: #000000 !important;
+    font-weight: bold !important;
+    opacity: 1 !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
   }
 
   /* Ensure parent modal/animation wrappers do not clip or restrict the ticket size */
@@ -88,7 +103,7 @@
   section:has(#cierre-print-area),
   main:has(#cierre-print-area),
   dialog:has(#cierre-print-area) {
-    position: static !important; /* breaks out of relative/absolute containing blocks */
+    position: static !important;
     overflow: visible !important;
     height: auto !important;
     max-height: none !important;
@@ -99,48 +114,87 @@
   }
 
   /* Headers and alignment */
+  #ticket-print-area h2,
+  #cierre-print-area h2 {
+    font-size: 13px !important;
+    font-weight: 900 !important;
+    text-align: center !important;
+    margin: 0 0 2px 0 !important;
+    text-transform: uppercase !important;
+    letter-spacing: -0.2px !important;
+    color: #000000 !important;
+  }
+
   #ticket-print-area h3,
   #cierre-print-area h3 {
-    font-size: 13px !important;
-    font-weight: bold !important;
+    font-size: 11px !important;
+    font-weight: 900 !important;
     text-align: center !important;
-    margin: 0 0 4px 0 !important;
+    margin: 0 0 2px 0 !important;
     text-transform: uppercase !important;
+    letter-spacing: -0.2px !important;
+    color: #000000 !important;
   }
 
   #ticket-print-area p,
   #cierre-print-area p {
     text-align: center !important;
-    font-size: 10px !important;
-    margin: 0 0 8px 0 !important;
+    font-size: 9px !important;
+    font-weight: bold !important;
+    margin: 0 0 4px 0 !important;
+    color: #000000 !important;
   }
 
   /* Divider lines for thermal paper */
   #ticket-print-area .border-b.border-dashed,
   #cierre-print-area .border-b.border-dashed {
-    border-bottom: 1.5px dashed #000 !important;
-    margin-top: 6px !important;
-    margin-bottom: 6px !important;
-    padding-bottom: 6px !important;
+    border-bottom: 1.5px dashed #000000 !important;
+    margin-top: 4px !important;
+    margin-bottom: 4px !important;
+    padding-bottom: 4px !important;
   }
 
   /* Specific typography styling for high contrast printing */
   #ticket-print-area .font-bold,
   #cierre-print-area .font-bold {
-    font-weight: bold !important;
+    font-weight: 900 !important;
+    color: #000000 !important;
   }
+  #ticket-print-area .text-slate-400,
   #ticket-print-area .text-slate-500,
   #ticket-print-area .text-slate-600,
   #ticket-print-area .text-slate-700,
   #ticket-print-area .text-slate-800,
   #ticket-print-area .text-blue-600,
+  #cierre-print-area .text-slate-400,
   #cierre-print-area .text-slate-500,
   #cierre-print-area .text-slate-600,
   #cierre-print-area .text-slate-700,
   #cierre-print-area .text-slate-800,
   #cierre-print-area .text-rose-600,
   #cierre-print-area .text-emerald-600 {
-    color: #000 !important;
+    color: #000000 !important;
+    font-weight: bold !important;
+  }
+
+  /* Force font-size on all inner text classes to stay clear and readable */
+  #ticket-print-area .text-xs,
+  #ticket-print-area .text-sm,
+  #cierre-print-area .text-xs,
+  #cierre-print-area .text-sm {
+    font-size: 9.5px !important;
+    font-weight: bold !important;
+    line-height: 1.2 !important;
+    color: #000000 !important;
+  }
+
+  #ticket-print-area .text-lg,
+  #ticket-print-area .text-xl,
+  #cierre-print-area .text-lg,
+  #cierre-print-area .text-xl {
+    font-size: 13px !important;
+    font-weight: 900 !important;
+    color: #000000 !important;
   }
 
   /* Layout grids and tables */
@@ -150,21 +204,25 @@
     flex-direction: row !important;
     justify-content: space-between !important;
     width: 100% !important;
+    gap: 2px !important;
   }
 
   #ticket-print-area .flex-1,
   #cierre-print-area .flex-1 {
     flex: 1 !important;
+    min-width: 0 !important;
   }
 
   #ticket-print-area .w-8,
   #cierre-print-area .w-8 {
-    width: 25px !important;
+    width: 16px !important;
+    min-width: 16px !important;
   }
 
   #ticket-print-area .w-20,
   #cierre-print-area .w-20 {
-    width: 60px !important;
+    width: 44px !important;
+    min-width: 44px !important;
     text-align: right !important;
   }
 
@@ -172,5 +230,28 @@
   #cierre-print-area .text-right {
     text-align: right !important;
   }
+
+  /* Ensure items spacing is tight for thermal print */
+  #ticket-print-area .space-y-4,
+  #ticket-print-area .space-y-3,
+  #ticket-print-area .space-y-2,
+  #cierre-print-area .space-y-4,
+  #cierre-print-area .space-y-3,
+  #cierre-print-area .space-y-2 {
+    margin-top: 0 !important;
+    margin-bottom: 3px !important;
+  }
+}
+
+/* Ocultar flechas (spinners) en inputs de tipo número */
+input::-webkit-outer-spin-button,
+input::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+input[type=number] {
+  -moz-appearance: textfield;
+  appearance: textfield;
 }
 

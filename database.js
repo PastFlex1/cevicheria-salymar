@@ -7,7 +7,9 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 // Initialize database
-const dbFile = path.join(__dirname, 'local.db');
+const dbFile = process.env.USER_DATA_PATH 
+  ? path.join(process.env.USER_DATA_PATH, 'local.db')
+  : path.join(__dirname, 'local.db');
 export const db = new sqlite3.Database(dbFile, (err) => {
   if (err) {
     console.error('Error opening database', err.message);

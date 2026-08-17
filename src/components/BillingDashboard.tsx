@@ -147,6 +147,17 @@ export default function BillingDashboard({
       try {
         showAlert(`Conectando con el SRI localmente para emitir ${documentType === "factura" ? "Factura" : "Nota de Venta"} (Firma, Recepción, Autorización)...`, "Procesando", "info");
         
+        const isFactura = documentType === "factura";
+        const maxDocId = salesNotes
+          .filter(n => isFactura ? n.documentType === "factura" : n.documentType !== "factura")
+          .reduce((max, note) => {
+            const parts = note.id.split('-');
+            const lastPart = parts[parts.length - 1];
+            const numId = parseInt(lastPart.replace(/\D/g, ""), 10);
+            return !isNaN(numId) && numId > max ? numId : max;
+          }, 0);
+        const nextSecuencialStr = (maxDocId + 1).toString().padStart(9, "0");
+
         // Armar el objeto para SRI
         const today = new Date();
         const formattedFecha = `${today.getDate().toString().padStart(2, "0")}/${(today.getMonth() + 1).toString().padStart(2, "0")}/${today.getFullYear()}`;
@@ -158,7 +169,7 @@ export default function BillingDashboard({
           dirMatriz: "PICHINCHA / QUITO / CHILIBULO / LA MAGDALENA ALTA S10 PURUHA OE6-203 Y OE6A HUALCOPO",
           estab: "001",
           ptoEmi: "001", 
-          secuencial: "000000001", 
+          secuencial: isFactura ? nextSecuencialStr : "000000001", 
           fechaEmision: formattedFecha,
           cliente: {
             razonSocial: clientForm.businessName || "CONSUMIDOR FINAL",
@@ -199,27 +210,18 @@ export default function BillingDashboard({
     }
 
     // Generate Invoice Number
-    let newId = "";
-    if (documentType === "factura") {
-      const existingInvoices = salesNotes.filter(n => n.documentType === "factura" && n.id.startsWith("FAC-"));
-      let nextNum = 1;
-      if (existingInvoices.length > 0) {
-        const maxId = Math.max(...existingInvoices.map(n => {
-          const num = parseInt(n.id.replace("FAC-", ""), 10);
-          return isNaN(num) ? 0 : num;
-        }));
-        nextNum = maxId + 1;
-      }
-      newId = `FAC-${nextNum.toString().padStart(6, "0")}`;
-    } else {
-      const currentMaxId = salesNotes.reduce((max, note) => {
-        const noteId = note.id;
-        const numId = parseInt(noteId.replace(/\D/g, ""), 10);
+    const isFactura = documentType === "factura";
+    const maxDocId = salesNotes
+      .filter(n => isFactura ? n.documentType === "factura" : n.documentType !== "factura")
+      .reduce((max, note) => {
+        const parts = note.id.split('-');
+        const lastPart = parts[parts.length - 1];
+        const numId = parseInt(lastPart.replace(/\D/g, ""), 10);
         return !isNaN(numId) && numId > max ? numId : max;
       }, 0);
-      const nextIdNum = currentMaxId + 1;
-      newId = `#${nextIdNum.toString().padStart(6, "0")}`;
-    }
+    const nextIdStr = (maxDocId + 1).toString().padStart(9, "0");
+    const prefix = isFactura ? "F-" : "N-";
+    const newId = `${prefix}001-001-${nextIdStr}`;
 
     const newInvoice: Order = {
       id: newId,
@@ -742,7 +744,7 @@ export default function BillingDashboard({
                           inv.status === "por_cobrar" ? "bg-orange-100 text-orange-700" :
                           "bg-emerald-100 text-emerald-700"
                         }`}>
-                          {inv.status === "paid" || inv.status === "cobrado" ? "PAGADA" : inv.status.toUpperCase()}
+                          {inv.status === "paid" || inv.status === "cobrado" ? "AUTORIZADA" : inv.status.toUpperCase()}
                         </span>
                       </td>
                       <td className="p-4 text-right space-x-2 whitespace-nowrap">
@@ -755,15 +757,7 @@ export default function BillingDashboard({
                         <button onClick={() => downloadPdf(inv)} className="p-1.5 bg-slate-100 text-slate-600 hover:bg-indigo-100 hover:text-indigo-600 rounded-md transition-colors" title="Descargar PDF">
                           <Download className="w-4 h-4" />
                         </button>
-                        {inv.status !== "anulada" && inv.documentType === "factura" && (
-                          <button 
-                            onClick={() => downloadUnsignedCreditNoteXML(inv)} 
-                            className="p-1.5 bg-slate-100 text-amber-600 hover:bg-amber-100 hover:text-amber-700 rounded-md transition-colors" 
-                            title="Descargar XML Nota de Crédito sin firmar (Anulación)"
-                          >
-                            <FileCode className="w-4 h-4 text-amber-600" />
-                          </button>
-                        )}
+
                         {inv.status !== "anulada" && (
                           <button onClick={() => setInvoiceToAnular(inv.id)} className="p-1.5 bg-slate-100 text-slate-600 hover:bg-red-100 hover:text-red-600 rounded-md transition-colors" title="Anular">
                             <Trash2 className="w-4 h-4" />
@@ -813,6 +807,9 @@ export default function BillingDashboard({
                                     email: cf.email || "",
                                     address: cf.address || ""
                                 });
+                                if (documentType === "factura") {
+                                    showAlert("Recuerda: El SRI solo acepta facturas a Consumidor Final por montos máximos de USD 50.", "Aviso SRI", "info");
+                                }
                             }
                         }}
                         className="text-xs font-bold text-slate-500 bg-slate-100 hover:bg-slate-200 px-3 py-1.5 rounded-lg transition-colors"
