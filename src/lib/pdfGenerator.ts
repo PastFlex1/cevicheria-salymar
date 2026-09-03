@@ -11,7 +11,200 @@ const PAYMENT_MAP: Record<string, string> = {
   "20": "20 - OTROS CON UTILIZACIÓN DEL SISTEMA FINANCIERO",
 };
 
+export function createNotaVentaPDF(order: Order, sriData: SRIInvoiceData) {
+  const doc = new jsPDF() as any;
+  const estab = sriData.estab || "001";
+  const ptoEmi = sriData.ptoEmi || "001";
+  const secuencial = sriData.secuencial || "000000001";
+  const displayNum = `${estab}-${ptoEmi}-${secuencial}`;
+  const esConsumidorFinal = !sriData.cliente.identificacion || sriData.cliente.identificacion === "9999999999999";
+
+  // 1. Logo
+  try {
+    const img = new Image();
+    img.src = '/Salymar.png';
+    doc.addImage(img, 'PNG', 15, 12, 38, 38);
+  } catch (e) {
+    console.warn("Could not add logo to Nota de Venta", e);
+  }
+
+  // 2. Datos del Negocio (Izquierda)
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(15);
+  doc.setTextColor(3, 105, 161); // Salymar Ocean Blue
+  doc.text('CEVICHERÍA SALYMAR', 58, 22);
+
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(8.5);
+  doc.setTextColor(71, 85, 105);
+  doc.text(`Propietario: ${sriData.razonSocialEmisor}`, 58, 28);
+  doc.text(`R.U.C.: ${sriData.rucEmisor}`, 58, 33);
+  doc.text(`Dirección: ${sriData.dirMatriz}`, 58, 38, { maxWidth: 65 });
+  doc.text(`Quito - Ecuador`, 58, 48);
+
+  // 3. Tarjeta del Comprobante (Derecha)
+  doc.setDrawColor(203, 213, 225);
+  doc.setFillColor(248, 250, 252);
+  doc.setLineWidth(0.5);
+  doc.roundedRect(128, 12, 68, 40, 3, 3, 'FD');
+
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(14);
+  doc.setTextColor(15, 23, 42);
+  doc.text('NOTA DE VENTA', 162, 22, { align: 'center' });
+
+  // Badge: DOCUMENTO SIN VALIDEZ TRIBUTARIA
+  doc.setFillColor(254, 242, 242);
+  doc.setDrawColor(254, 202, 202);
+  doc.roundedRect(132, 26, 60, 6, 2, 2, 'FD');
+  doc.setFontSize(6.5);
+  doc.setFont('helvetica', 'bold');
+  doc.setTextColor(220, 38, 38);
+  doc.text('SIN VALIDEZ TRIBUTARIA', 162, 30.5, { align: 'center' });
+
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(10);
+  doc.setTextColor(3, 105, 161);
+  doc.text(`No. ${displayNum}`, 162, 40, { align: 'center' });
+
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(8);
+  doc.setTextColor(100, 116, 139);
+  doc.text(`Fecha: ${sriData.fechaEmision}`, 162, 46, { align: 'center' });
+
+  // 4. Caja de Datos del Cliente
+  doc.setDrawColor(226, 232, 240);
+  doc.setFillColor(255, 255, 255);
+  doc.roundedRect(15, 58, 181, 24, 2, 2, 'FD');
+
+  doc.setFontSize(8.5);
+  doc.setFont('helvetica', 'bold');
+  doc.setTextColor(100, 116, 139);
+  doc.text('CLIENTE:', 19, 65);
+  doc.text('RUC / C.I.:', 19, 71);
+  doc.text('DIRECCIÓN:', 19, 77);
+
+  doc.setFont('helvetica', 'normal');
+  doc.setTextColor(15, 23, 42);
+  const clienteNombre = esConsumidorFinal ? "CONSUMIDOR FINAL" : (sriData.cliente.razonSocial || "CONSUMIDOR FINAL");
+  doc.setFont('helvetica', 'bold');
+  doc.text(clienteNombre.toUpperCase(), 42, 65, { maxWidth: 75 });
+  doc.setFont('helvetica', 'normal');
+  doc.text(sriData.cliente.identificacion || "9999999999999", 42, 71);
+  doc.text(esConsumidorFinal ? "QUITO" : (sriData.cliente.direccion || "QUITO"), 42, 77, { maxWidth: 75 });
+
+  doc.setFont('helvetica', 'bold');
+  doc.setTextColor(100, 116, 139);
+  doc.text('FORMA PAGO:', 125, 65);
+  doc.text('MESA / PEDIDO:', 125, 71);
+
+  doc.setFont('helvetica', 'normal');
+  doc.setTextColor(15, 23, 42);
+  doc.text((order.paymentMethod || "Efectivo").toUpperCase(), 155, 65);
+  doc.text((order.tableNumber || "Mesa / Local").toUpperCase(), 155, 71);
+
+  // 5. Tabla de Productos (autoTable)
+  const items = sriData.items && sriData.items.length > 0 ? sriData.items : (order.items || []).map((it: any) => ({
+    cantidad: it.quantity,
+    descripcion: it.menuItem?.name || it.descripcion || "Item",
+    precioUnitario: it.menuItem?.price || it.precioUnitario || 0,
+    descuento: 0
+  }));
+
+  const tableRows = items.map((it: any) => {
+    const cant = Number(it.cantidad || 1);
+    const pUnit = Number(it.precioUnitario || 0);
+    const totalRow = cant * pUnit;
+    return [
+      `${cant}x`,
+      (it.descripcion || "").toUpperCase(),
+      `$${pUnit.toFixed(2)}`,
+      `$${totalRow.toFixed(2)}`
+    ];
+  });
+
+  autoTable(doc, {
+    startY: 86,
+    margin: { left: 15, right: 15 },
+    head: [['CANT.', 'DESCRIPCIÓN DE PRODUCTO', 'PRECIO UNIT.', 'TOTAL']],
+    body: tableRows,
+    theme: 'striped',
+    headStyles: {
+      fillColor: [3, 105, 161],
+      textColor: [255, 255, 255],
+      fontStyle: 'bold',
+      fontSize: 8.5,
+      halign: 'left',
+      cellPadding: 3
+    },
+    bodyStyles: {
+      fontSize: 8,
+      cellPadding: 2.5,
+      textColor: [30, 41, 59]
+    },
+    columnStyles: {
+      0: { halign: 'center', cellWidth: 18, fontStyle: 'bold' },
+      1: { halign: 'left' },
+      2: { halign: 'right', cellWidth: 28 },
+      3: { halign: 'right', cellWidth: 28, fontStyle: 'bold' }
+    }
+  });
+
+  const finalY = (doc as any).lastAutoTable?.finalY || 140;
+
+  // 6. Totales
+  const totalBoxY = finalY + 6;
+  doc.setDrawColor(226, 232, 240);
+  doc.setFillColor(248, 250, 252);
+  doc.roundedRect(120, totalBoxY, 76, 26, 2, 2, 'FD');
+
+  const subtotalVal = order.subtotal || order.total || 0;
+  const descVal = order.discount || 0;
+  const totalVal = order.total || subtotalVal;
+
+  doc.setFontSize(8.5);
+  doc.setFont('helvetica', 'normal');
+  doc.setTextColor(100, 116, 139);
+  doc.text('Subtotal:', 125, totalBoxY + 7);
+  doc.setTextColor(15, 23, 42);
+  doc.text(`$${Number(subtotalVal).toFixed(2)}`, 190, totalBoxY + 7, { align: 'right' });
+
+  if (descVal > 0) {
+    doc.setTextColor(100, 116, 139);
+    doc.text('Descuento:', 125, totalBoxY + 13);
+    doc.setTextColor(220, 38, 38);
+    doc.text(`-$${Number(descVal).toFixed(2)}`, 190, totalBoxY + 13, { align: 'right' });
+  }
+
+  doc.setDrawColor(203, 213, 225);
+  doc.line(125, totalBoxY + 16, 191, totalBoxY + 16);
+
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(11);
+  doc.setTextColor(15, 23, 42);
+  doc.text('TOTAL A PAGAR:', 125, totalBoxY + 22);
+  doc.setTextColor(22, 163, 74);
+  doc.setFontSize(12);
+  doc.text(`$${Number(totalVal).toFixed(2)}`, 190, totalBoxY + 22, { align: 'right' });
+
+  // 7. Pie de Página y Agradecimiento
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(8);
+  doc.setTextColor(100, 116, 139);
+  doc.text('¡Gracias por su visita a Cevichería Salymar!', 15, totalBoxY + 8);
+  doc.setFontSize(7.5);
+  doc.text('El auténtico y más fresco sabor del mar en Quito.', 15, totalBoxY + 13);
+  doc.setTextColor(148, 163, 184);
+  doc.text('* Comprobante de consumo interno sin validez tributaria.', 15, totalBoxY + 22);
+
+  return doc;
+}
+
 export function createPDFDoc(order: Order, sriData: SRIInvoiceData, sriAuth?: { authDate: string; authNumber: string }) {
+  if (order.documentType === "nota") {
+    return createNotaVentaPDF(order, sriData);
+  }
+
   const doc = new jsPDF() as any;
   const isFactura = true;
   
@@ -21,7 +214,7 @@ export function createPDFDoc(order: Order, sriData: SRIInvoiceData, sriAuth?: { 
   const displayNum = `${estab}-${ptoEmi}-${secuencial}`;
 
   if (isFactura) {
-    const activeCodDoc = sriData.facturaModificada ? "04" : (order.documentType === "nota" ? "02" : "01");
+    const activeCodDoc = sriData.facturaModificada ? "04" : "01";
     const accessKey = generateAccessKey({ ...sriData, fechaEmision: sriData.fechaEmision }, activeCodDoc);
     const authNumber = sriAuth?.authNumber || accessKey;
     const esConsumidorFinal = sriData.cliente.identificacion === "9999999999999";
@@ -67,9 +260,7 @@ export function createPDFDoc(order: Order, sriData: SRIInvoiceData, sriAuth?: { 
     doc.text(`R.U.C.: ${sriData.rucEmisor}`, 110, 20);
     
     doc.setFontSize(14);
-    let docTitle = 'FACTURA';
-    if (sriData.facturaModificada) docTitle = 'NOTA DE CRÉDITO';
-    else if (order.documentType === 'nota') docTitle = 'NOTA DE VENTA';
+    let docTitle = sriData.facturaModificada ? 'NOTA DE CRÉDITO' : 'FACTURA';
     doc.text(docTitle, 110, 30);
     
     doc.setFontSize(11);
@@ -255,10 +446,9 @@ export function createPDFDoc(order: Order, sriData: SRIInvoiceData, sriAuth?: { 
     doc.text(methodDesc, 12, tablePaymentY + 11.5, { maxWidth: 76 });
 
     // Calculate total
-    const isNotaVenta = order.documentType === 'nota';
     const totalDescuento = sriData.items.reduce((acc, item) => acc + (item.descuento || 0), 0);
     const subtotal = sriData.items.reduce((acc, item) => acc + (item.cantidad * item.precioUnitario), 0) - totalDescuento;
-    const iva = isNotaVenta ? 0.00 : subtotal * 0.15;
+    const iva = subtotal * 0.15;
     const total = subtotal + iva;
 
     doc.rect(90, tablePaymentY + 6, 30, 8, 'S');
@@ -276,19 +466,7 @@ export function createPDFDoc(order: Order, sriData: SRIInvoiceData, sriAuth?: { 
       currentY += 5;
     };
 
-    if (isNotaVenta) {
-      drawTotalRow('SUBTOTAL 0%', `${subtotal.toFixed(2)}`); 
-      drawTotalRow('SUBTOTAL NO OBJETO DE IVA', '0.00');
-      drawTotalRow('SUBTOTAL EXENTO DE IVA', '0.00');
-      drawTotalRow('SUBTOTAL SIN IMPUESTOS', `${subtotal.toFixed(2)}`);
-      drawTotalRow('TOTAL DESCUENTO', `${totalDescuento.toFixed(2)}`);
-      drawTotalRow('ICE', '0.00');
-      drawTotalRow('IRBPNR', '0.00');
-      drawTotalRow('IVA 0%', '0.00'); 
-      drawTotalRow('PROPINA', '0.00');
-      drawTotalRow('VALOR TOTAL', `${total.toFixed(2)}`, true);
-    } else {
-      drawTotalRow('SUBTOTAL 15%', `${subtotal.toFixed(2)}`); 
+    drawTotalRow('SUBTOTAL 15%', `${subtotal.toFixed(2)}`); 
       drawTotalRow('SUBTOTAL NO OBJETO DE IVA', '0.00');
       drawTotalRow('SUBTOTAL EXENTO DE IVA', '0.00');
       drawTotalRow('SUBTOTAL SIN IMPUESTOS', `${subtotal.toFixed(2)}`);
@@ -298,7 +476,6 @@ export function createPDFDoc(order: Order, sriData: SRIInvoiceData, sriAuth?: { 
       drawTotalRow('IVA 15%', `${iva.toFixed(2)}`); 
       drawTotalRow('PROPINA', '0.00');
       drawTotalRow('VALOR TOTAL', `${total.toFixed(2)}`, true);
-    }
 
     currentY += 2;
     doc.rect(totalX, currentY, 75, 10, 'S');
@@ -310,3 +487,15 @@ export function createPDFDoc(order: Order, sriData: SRIInvoiceData, sriAuth?: { 
 
   return doc;
 }
+
+export function generatePdfBase64(order: Order, sriData: SRIInvoiceData, sriAuth?: { authDate: string; authNumber: string }): string {
+  try {
+    const doc = createPDFDoc(order, sriData, sriAuth);
+    const dataUri = doc.output('datauristring');
+    return dataUri.includes(',') ? dataUri.split(',')[1] : dataUri;
+  } catch (err) {
+    console.error("Error generating PDF base64:", err);
+    return "";
+  }
+}
+

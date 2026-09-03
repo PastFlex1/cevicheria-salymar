@@ -4,6 +4,7 @@ import * as ExcelJS from "exceljs";
 import { saveAs } from "file-saver";
 import { motion, AnimatePresence } from "motion/react";
 import { validarDocumento, detectarTipoDocumento, obtenerNombreTipoDocumento, limpiarDocumento } from "./lib/validators";
+import { generatePdfBase64 } from "./lib/pdfGenerator";
 import {
   Plus,
   Minus,
@@ -1350,6 +1351,11 @@ export default function App() {
     const orderIndex = salesNotes.findIndex((o) => o.id === orderToDelete);
     if (orderIndex !== -1) {
       const order = salesNotes[orderIndex];
+      if (order.documentType === "factura" || order.sriAuth || order.id.startsWith("F-")) {
+        setValidationError("Las facturas electrónicas emitidas no se pueden eliminar. Por normativa del SRI solo pueden ser anuladas.");
+        setOrderToDelete(null);
+        return;
+      }
       if (order.status !== "anulada") {
         updateInventory(order.items, true);
       }
@@ -1508,21 +1514,21 @@ export default function App() {
     let sriDataToUse: SRIInvoiceData | null = null;
     let authResponse: any = null;
 
+    let invoiceOrderId: string | null = null;
+
     if (documentType === "factura") {
       setSriStatus("signing");
       
-      let finalOrderId = editingOrderId;
-      if (!finalOrderId) {
-        const currentMaxId = salesNotes
-          .filter(n => n.documentType === "factura")
-          .reduce((max, note) => {
-            const parts = note.id.split('-');
-            const lastPart = parts[parts.length - 1];
-            const numId = parseInt(lastPart.replace(/\D/g, ""), 10);
-            return !isNaN(numId) && numId > max ? numId : max;
-          }, 0);
-        finalOrderId = `F-001-001-${(currentMaxId + 1).toString().padStart(9, "0")}`;
-      }
+      const currentMaxId = salesNotes
+        .filter(n => n.documentType === "factura" || n.sriAuth || n.id.startsWith("F-"))
+        .reduce((max, note) => {
+          const parts = note.id.split('-');
+          const lastPart = parts[parts.length - 1];
+          const numId = parseInt(lastPart.replace(/\D/g, ""), 10);
+          return !isNaN(numId) && numId > max ? numId : max;
+        }, 0);
+      const nextSecuencialStr = (currentMaxId + 1).toString().padStart(9, "0");
+      invoiceOrderId = `F-001-001-${nextSecuencialStr}`;
 
       const itemsToBill = cartItems.length > 0 ? cartItems : [];
       const internalNumericCode = Math.floor(10000000 + Math.random() * 90000000).toString();
@@ -1534,7 +1540,7 @@ export default function App() {
         dirMatriz: "S10 PURUHA OE6-203 Y OE6A HUALCOPO, QUITO",
         estab: "001",
         ptoEmi: "001",
-        secuencial: finalOrderId.split('-').pop()?.replace(/\D/g, "") || "",
+        secuencial: nextSecuencialStr,
         fechaEmision: new Date().toLocaleDateString("en-GB"),
         cliente: {
             razonSocial: checkoutForm.businessName || "CONSUMIDOR FINAL",
@@ -1577,20 +1583,63 @@ export default function App() {
         sriDataToUse = sriData;
         
         // Descargar el XML de la respuesta de Autorización
+        const targetFilenameId = invoiceOrderId || editingOrderId || "comprobante";
         if (res.data && res.data.xmlFirmado) {
           let xmlToDownload = res.data.xmlFirmado;
-          let filename = `factura_firmada_${finalOrderId.replace("#", "")}.xml`;
+          let filename = `factura_firmada_${targetFilenameId.replace("#", "")}.xml`;
 
           if (res.sriAuth?.autorizacionXML) {
             const authMatch = res.sriAuth.autorizacionXML.match(/<autorizacion>([\s\S]*?)<\/autorizacion>/);
             if (authMatch) {
               xmlToDownload = `<?xml version="1.0" encoding="UTF-8"?>\n<autorizacion>${authMatch[1]}</autorizacion>`;
-              filename = `autorizacion_${finalOrderId.replace("#", "")}.xml`;
+              filename = `autorizacion_${targetFilenameId.replace("#", "")}.xml`;
             }
           }
           downloadXML(xmlToDownload, filename);
         } else {
-          downloadXML(xml, `factura_${finalOrderId.replace("#", "")}.xml`);
+          downloadXML(xml, `factura_${targetFilenameId.replace("#", "")}.xml`);
+        }
+
+        // Envío automático de factura con Resend si el cliente tiene correo (adjunta RIDE PDF y XML firmado)
+        if (checkoutForm.email && checkoutForm.email.includes("@")) {
+          const tempOrderForPdf: any = {
+            id: targetFilenameId,
+            documentType: "factura",
+            items: cartItems,
+            total,
+            subtotal,
+            tax,
+            date: new Date().toISOString(),
+            customerName: checkoutForm.businessName || "Consumidor Final",
+            paymentMethod: checkoutForm.paymentMethod,
+            sriAuth: res.sriAuth,
+            status: "paid"
+          };
+          const pdfBase64 = generatePdfBase64(tempOrderForPdf, sriData, res.sriAuth);
+
+          fetch("/api/send-invoice-email", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              to: checkoutForm.email,
+              customerName: checkoutForm.businessName || "Cliente",
+              invoiceNumber: targetFilenameId.replace(/^[FN]-/, ""),
+              documentType: "factura",
+              total: total,
+              date: new Date().toLocaleDateString("es-EC"),
+              claveAcceso: claveAcceso,
+              xml: res.sriAuth?.autorizacionXML || res.data?.xmlFirmado || xml,
+              pdfBase64: pdfBase64 || undefined,
+              items: sriData.items,
+              paymentMethod: checkoutForm.paymentMethod || "Efectivo"
+            })
+          })
+          .then(r => r.json())
+          .then(d => {
+            if (d.success) console.log("[Resend] Factura (PDF y XML) enviada automáticamente:", d);
+            else console.warn("[Resend] Aviso al enviar correo:", d.error);
+          })
+          .catch(err => console.error("[Resend] Error enviando correo:", err));
         }
       } catch (e: any) {
         console.error("Error procesando SRI", e);
@@ -1630,8 +1679,11 @@ export default function App() {
       setSalesNotes((prev) => 
         prev.map((order) => {
           if (order.id === editingOrderId) {
+            const assignedId = invoiceOrderId || (documentType === "factura" ? (order.id.startsWith("F-") ? order.id : `F-${order.id}`) : (order.id.startsWith("N-") ? order.id : `N-${order.id}`));
             updatedOrder = {
               ...order,
+              id: assignedId,
+              relatedOrderId: assignedId !== order.id ? order.id : order.relatedOrderId,
               items: [...cartItems],
               subtotal,
               tax,
@@ -1663,7 +1715,7 @@ export default function App() {
     } else {
       const isFactura = documentType === "factura";
       const currentMaxId = salesNotes
-        .filter(n => isFactura ? n.documentType === "factura" : n.documentType !== "factura")
+        .filter(n => isFactura ? (n.documentType === "factura" || n.sriAuth || n.id.startsWith("F-")) : (n.documentType !== "factura" && !n.id.startsWith("F-")))
         .reduce((max, note) => {
           const parts = note.id.split('-');
           const lastPart = parts[parts.length - 1];
@@ -1675,7 +1727,7 @@ export default function App() {
       const prefix = isFactura ? "F-" : "N-";
 
       const newOrder: Order = {
-        id: `${prefix}001-001-${nextIdStr}`,
+        id: invoiceOrderId || `${prefix}001-001-${nextIdStr}`,
         items: [...cartItems],
         subtotal,
         tax,
@@ -1700,6 +1752,55 @@ export default function App() {
         setPreviewOrder(newOrder);
       }
       processedOrder = newOrder;
+    }
+
+    // Envío automático de Nota de Venta por correo con Resend (únicamente PDF, sin XML)
+    if (documentType === "nota" && checkoutForm.email && checkoutForm.email.includes("@") && processedOrder) {
+      const currentOrder = processedOrder;
+      const cleanNum = currentOrder.id.replace(/^[FN]-/, "");
+      const sriDataNota: SRIInvoiceData = {
+        rucEmisor: "1714809025001",
+        razonSocialEmisor: "ACHI LOPEZ JOSUE ANDRES",
+        nombreComercialEmisor: "CEVICHERIA SALYMAR",
+        dirMatriz: "PICHINCHA / QUITO / CHILIBULO / LA MAGDALENA ALTA S10 PURUHA OE6-203 Y OE6A HUALCOPO",
+        estab: "001",
+        ptoEmi: "001",
+        secuencial: cleanNum.split("-").pop()?.replace(/\D/g, "") || "000000001",
+        fechaEmision: new Date().toLocaleDateString("es-EC"),
+        cliente: {
+          razonSocial: checkoutForm.businessName || "CONSUMIDOR FINAL",
+          identificacion: checkoutForm.documentId || "9999999999999",
+          direccion: checkoutForm.address,
+          email: checkoutForm.email
+        },
+        items: cartItems.map(it => ({
+          codigo: it.menuItem.id,
+          descripcion: it.menuItem.name,
+          cantidad: it.quantity,
+          precioUnitario: it.menuItem.price,
+          descuento: 0
+        })),
+        formaPago: checkoutForm.paymentMethod === "Efectivo" ? "01" : "20"
+      };
+      const pdfBase64 = generatePdfBase64(currentOrder, sriDataNota);
+      fetch("/api/send-invoice-email", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          to: checkoutForm.email,
+          customerName: checkoutForm.businessName || "Cliente",
+          invoiceNumber: cleanNum,
+          documentType: "nota",
+          total: total,
+          date: new Date().toLocaleDateString("es-EC"),
+          pdfBase64: pdfBase64 || undefined,
+          items: sriDataNota.items,
+          paymentMethod: checkoutForm.paymentMethod || "Efectivo"
+        })
+      })
+      .then(r => r.json())
+      .then(d => console.log("[Resend] Nota de Venta (solo PDF) enviada por correo:", d))
+      .catch(err => console.error("[Resend] Error enviando correo:", err));
     }
     setCartItems([]);
     setCheckoutForm({
@@ -2326,15 +2427,17 @@ export default function App() {
                                   Anular Venta
                                 </button>
                               )}
-                              <button
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  handleDeleteOrder(note.id);
-                                }}
-                                className="text-[10px] text-left text-red-500 hover:text-red-700 font-bold uppercase tracking-wider py-1"
-                              >
-                                Eliminar
-                              </button>
+                              {note.documentType !== "factura" && !note.sriAuth && !note.id.startsWith("F-") && (
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleDeleteOrder(note.id);
+                                  }}
+                                  className="text-[10px] text-left text-red-500 hover:text-red-700 font-bold uppercase tracking-wider py-1"
+                                >
+                                  Eliminar
+                                </button>
+                              )}
                             </div>
                             <span className="text-xl font-black text-blue-600">
                               {formatCurrency(note.total)}

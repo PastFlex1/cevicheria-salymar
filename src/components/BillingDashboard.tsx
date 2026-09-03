@@ -1,13 +1,13 @@
 import React, { useState, useMemo, useEffect, useRef } from "react";
 import { Order, OrderItem, MenuItem, OrderStatus, Customer } from "../types";
-import { Search, Plus, Trash2, Printer, Download, Receipt, X, ArrowLeft, DollarSign, CreditCard, Wallet, User, CheckCircle, SearchCode, AlertCircle, XCircle, FileCode } from "lucide-react";
+import { Search, Plus, Trash2, Printer, Download, Receipt, X, ArrowLeft, DollarSign, CreditCard, Wallet, User, CheckCircle, SearchCode, AlertCircle, XCircle, FileCode, Mail } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import * as ExcelJS from "exceljs";
 import { saveAs } from "file-saver";
 import { validarDocumento, detectarTipoDocumento, obtenerNombreTipoDocumento, limpiarDocumento } from "../lib/validators";
 import { generateInvoiceXML, generateAccessKey, SRIInvoiceData, procesarYEnviarSRI, generateCreditNoteXML, generateNotaVentaXML } from "../lib/sri";
 import Pagination from "./Pagination";
-import { createPDFDoc } from "../lib/pdfGenerator";
+import { createPDFDoc, generatePdfBase64 } from "../lib/pdfGenerator";
 
 export interface BillingDashboardProps {
   salesNotes: Order[];
@@ -283,6 +283,10 @@ export default function BillingDashboard({
         status: "cobrado",
         relatedOrderId: newId,
       });
+    }
+
+    if (newInvoice.clientEmail && newInvoice.clientEmail.includes("@")) {
+      sendEmailInvoice(newInvoice);
     }
 
     showAlert(documentType === "factura" ? "Factura generada con éxito." : "Nota de venta generada con éxito.", "Venta Completada", "success");
@@ -647,6 +651,94 @@ export default function BillingDashboard({
     }
   };
 
+  const sendEmailInvoice = async (inv: Order) => {
+    let emailToSend = inv.clientEmail;
+    if (!emailToSend || !emailToSend.includes("@")) {
+      const prompted = window.prompt("Ingrese el correo electrónico del cliente para enviar el comprobante:", inv.clientEmail || "");
+      if (!prompted || !prompted.includes("@")) {
+        showAlert("Debe ingresar un correo electrónico válido.", "Aviso", "warning");
+        return;
+      }
+      emailToSend = prompted.trim();
+    }
+
+    try {
+      const isNota = inv.documentType === "nota";
+      const isNC = inv.status === "anulada" && inv.sriAuth?.creditNote;
+      showAlert(`Generando comprobante y enviando correo a ${emailToSend}...`, "Enviando", "info");
+
+      const cleanId = String(inv.sriAuth?.secuencial || inv.id).replace(/\D/g, "");
+      const activeSequential = cleanId.slice(-9).padStart(9, "0");
+
+      const sriData: SRIInvoiceData = {
+        rucEmisor: "1714809025001",
+        razonSocialEmisor: "ACHI LOPEZ JOSUE ANDRES",
+        nombreComercialEmisor: "CEVICHERIA SALYMAR",
+        dirMatriz: "PICHINCHA / QUITO / CHILIBULO / LA MAGDALENA ALTA S10 PURUHA OE6-203 Y OE6A HUALCOPO",
+        estab: "001",
+        ptoEmi: "001",
+        secuencial: isNC ? (inv.sriAuth?.creditNote?.secuencial || "000000001") : activeSequential,
+        fechaEmision: new Date(inv.date).toLocaleDateString("es-EC", {
+          day: "2-digit",
+          month: "2-digit",
+          year: "numeric"
+        }),
+        cliente: {
+          razonSocial: inv.businessName || inv.customerName || "CONSUMIDOR FINAL",
+          identificacion: inv.ruc || inv.clientId || "9999999999999",
+          direccion: inv.clientAddress || undefined,
+          email: emailToSend
+        },
+        items: inv.items.map(item => ({
+          codigo: item.menuItem.id,
+          descripcion: item.menuItem.name,
+          cantidad: item.quantity,
+          precioUnitario: isNota ? item.menuItem.price : item.menuItem.price / 1.15,
+          descuento: 0
+        })),
+        formaPago: inv.paymentMethod === "Efectivo" ? "01" : "20",
+      };
+
+      if (isNC) {
+        sriData.facturaModificada = {
+          numero: `001-001-${activeSequential}`,
+          fecha: new Date(inv.date).toLocaleDateString("es-EC")
+        };
+      }
+
+      // Generar el PDF en base64 para adjuntar
+      const pdfBase64 = generatePdfBase64(inv, sriData, isNC ? inv.sriAuth?.creditNote : inv.sriAuth);
+
+      const res = await fetch("/api/send-invoice-email", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          to: emailToSend,
+          customerName: inv.customerName || inv.businessName || "Cliente",
+          invoiceNumber: inv.id.replace(/^[FN]-/, ""),
+          documentType: inv.documentType || "factura",
+          total: inv.total,
+          date: new Date(inv.date).toLocaleDateString("es-EC"),
+          claveAcceso: inv.sriAuth?.authNumber || undefined,
+          xml: isNota ? undefined : (inv.sriAuth?.autorizacionXML || undefined),
+          pdfBase64: pdfBase64 || undefined,
+          items: inv.items,
+          paymentMethod: inv.paymentMethod || "Efectivo"
+        })
+      });
+
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || "No se pudo enviar el correo");
+      }
+
+      showAlert(`¡${isNota ? "Nota de Venta" : "Factura"} enviada exitosamente a ${emailToSend} con Resend!`, "Correo Enviado", "success");
+    } catch (err: any) {
+      console.error(err);
+      showAlert(`Error al enviar el correo: ${err.message}`, "Error", "error");
+    }
+  };
+
   return (
     <div className="flex-1 pb-12 flex flex-col h-full bg-slate-50/50">
       <div className="flex justify-between items-center mb-6 px-6 pt-6 shrink-0">
@@ -729,7 +821,7 @@ export default function BillingDashboard({
                 ) : (
                   paginatedInvoices.map((inv) => (
                     <tr key={inv.id} className="border-b border-slate-50 hover:bg-slate-50 transition-colors">
-                      <td className="p-4 font-bold text-slate-800">{inv.id}</td>
+                      <td className="p-4 font-bold text-slate-800">{inv.id.replace(/^[FN]-/, "")}</td>
                       <td className="p-4 text-slate-600 whitespace-nowrap">
                         {new Date(inv.date).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' })}
                       </td>
@@ -756,6 +848,9 @@ export default function BillingDashboard({
                         </button>
                         <button onClick={() => downloadPdf(inv)} className="p-1.5 bg-slate-100 text-slate-600 hover:bg-indigo-100 hover:text-indigo-600 rounded-md transition-colors" title="Descargar PDF">
                           <Download className="w-4 h-4" />
+                        </button>
+                        <button onClick={() => sendEmailInvoice(inv)} className="p-1.5 bg-slate-100 text-slate-600 hover:bg-sky-100 hover:text-sky-600 rounded-md transition-colors" title="Enviar Factura por Correo (Resend)">
+                          <Mail className="w-4 h-4" />
                         </button>
 
                         {inv.status !== "anulada" && (
@@ -1246,7 +1341,7 @@ export default function BillingDashboard({
             >
               <h3 className="text-xl font-bold text-slate-800 mb-2">Anular Factura</h3>
               <p className="text-slate-500 text-sm mb-4">
-                ¿Seguro que deseas anular la factura <strong>{invoiceToAnular}</strong>?
+                ¿Seguro que deseas anular la factura <strong>{invoiceToAnular?.replace(/^[FN]-/, "")}</strong>?
               </p>
               <div className="flex gap-3 mt-4">
                 <button onClick={() => setInvoiceToAnular(null)} className="flex-1 py-3 bg-slate-100 hover:bg-slate-200 rounded-xl font-bold text-sm">Cancelar</button>
