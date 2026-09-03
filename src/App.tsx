@@ -4255,9 +4255,9 @@ export default function App() {
 
                 <div className="space-y-3 mb-6 border-b border-dashed border-slate-200 pb-6">
                   <div className="flex justify-between text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">
-                    <span>Cant</span>
-                    <span className="text-left flex-1 mx-2">Descripción</span>
-                    <span className="text-right">Total</span>
+                    <span className="w-8">Cant</span>
+                    <span className="text-left flex-1">Descripción</span>
+                    <span className="w-20 text-right">Total</span>
                   </div>
                   {previewOrder.items.map((item, idx) => (
                     <div key={idx} className="flex justify-between text-sm">

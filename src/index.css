@@ -40,6 +40,7 @@
   html, body {
     margin: 0 !important;
     padding: 0 !important;
+    width: 100% !important;
     height: auto !important;
     min-height: 100% !important;
     overflow: visible !important;
@@ -59,20 +60,26 @@
     visibility: visible !important;
   }
 
-  /* Position the print area with 4mm left margin offset for thermal printers.
-     For 55mm/58mm thermal printers, printable width is ~46mm-48mm. */
+  /* Centrar el ticket horizontalmente en el rollo de 58mm.
+     En impresoras térmicas de 58mm, el cabezal de impresión real es de 48mm (384 puntos).
+     Al fijar el ancho en 46mm con márgenes automáticos centrados, se deja ~1mm seguro
+     a cada lado del cabezal térmico y queda perfectamente centrado en el papel. */
   #ticket-print-area,
   #cierre-print-area {
     position: absolute !important;
-    left: 4mm !important;
+    left: 0 !important;
+    right: 0 !important;
+    margin-left: auto !important;
+    margin-right: auto !important;
+    margin-top: 0 !important;
+    margin-bottom: 0 !important;
     top: 0 !important;
-    width: 48mm !important;
-    max-width: 48mm !important;
-    margin: 0 !important;
+    width: 46mm !important;
+    max-width: 46mm !important;
     padding: 1mm 1mm !important;
     box-sizing: border-box !important;
     font-family: 'Courier New', Courier, monospace, 'Arial', sans-serif !important;
-    font-size: 9.5px !important;
+    font-size: 9px !important;
     line-height: 1.2 !important;
     color: #000000 !important;
     font-weight: 800 !important;
@@ -116,7 +123,7 @@
   /* Headers and alignment */
   #ticket-print-area h2,
   #cierre-print-area h2 {
-    font-size: 13px !important;
+    font-size: 12.5px !important;
     font-weight: 900 !important;
     text-align: center !important;
     margin: 0 0 2px 0 !important;
@@ -139,9 +146,9 @@
   #ticket-print-area p,
   #cierre-print-area p {
     text-align: center !important;
-    font-size: 9px !important;
+    font-size: 8.5px !important;
     font-weight: bold !important;
-    margin: 0 0 4px 0 !important;
+    margin: 0 0 3px 0 !important;
     color: #000000 !important;
   }
 
@@ -182,7 +189,7 @@
   #ticket-print-area .text-sm,
   #cierre-print-area .text-xs,
   #cierre-print-area .text-sm {
-    font-size: 9.5px !important;
+    font-size: 9px !important;
     font-weight: bold !important;
     line-height: 1.2 !important;
     color: #000000 !important;
@@ -229,6 +236,12 @@
   #ticket-print-area .text-right,
   #cierre-print-area .text-right {
     text-align: right !important;
+  }
+
+  #ticket-print-area .mx-2,
+  #cierre-print-area .mx-2 {
+    margin-left: 0 !important;
+    margin-right: 0 !important;
   }
 
   /* Ensure items spacing is tight for thermal print */
